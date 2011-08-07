@@ -19,6 +19,9 @@ module Test.Chell
 	, suiteName
 	, suiteTests
 	
+	-- * Main
+	, defaultMain
+	
 	-- * basic
 	, Assertion
 	, IsAssertion
@@ -45,11 +48,15 @@ module Test.Chell
 
 import qualified Control.Exception
 import           Control.Exception (Exception)
+import           Control.Monad (when, forM_)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad.Trans.State (StateT, execStateT, get, put)
 import           Data.Maybe (isJust, isNothing)
 import qualified Data.Text
 import           Data.Text (Text)
 import qualified Data.Text.IO
+import           System.Exit (exitSuccess, exitFailure)
+import           System.IO (stderr, hPutStr, hPutStrLn)
 
 import qualified Language.Haskell.TH as TH
 
@@ -191,6 +198,66 @@ expect = do
 	loc <- TH.location
 	let qloc = liftLoc loc
 	[| assertAt $qloc False |]
+
+defaultMain :: [Suite] -> IO ()
+defaultMain suites = do
+	let state = (0, 0, 0, 0)
+	let tests = concatMap suiteTests suites
+	endState <- execStateT (mapM_ recordTest tests) state
+	let (passed, skipped, failed, errors) = endState
+	let allPassed = case (failed, errors) of
+		(0, 0) -> True
+		_      -> False
+	if allPassed
+		then hPutStr stderr "PASS: "
+		else hPutStr stderr "FAIL: "
+	
+	let putNum comma n what = hPutStr stderr $ if n == 1
+		then comma ++ "1 test " ++ what
+		else comma ++ show n ++ " tests " ++ what
+	
+	let total = sum [passed, skipped, failed, errors]
+	putNum "" total "run"
+	when (passed > 0) (putNum ", " passed "passed")
+	when (skipped > 0) (putNum ", " skipped "skipped")
+	when (failed > 0) (putNum ", " failed "failed")
+	when (errors > 0) (putNum ", " errors "aborted")
+	hPutStr stderr "\n"
+	
+	if allPassed
+		then exitSuccess
+		else exitFailure
+
+recordTest :: (Text, Test) -> StateT (Integer, Integer, Integer, Integer) IO ()
+recordTest (name, t) = do
+	result <- liftIO (runTest t)
+	(passed, skipped, failed, errors) <- get
+	newState <- liftIO $ case result of
+		TestResultSuccess -> return (passed + 1, skipped, failed, errors)
+		TestResultSkipped -> return (passed, skipped + 1, failed, errors)
+		TestResultFailure fs -> do
+			hPutStr stderr "FAIL "
+			Data.Text.IO.hPutStrLn stderr name
+			forM_ fs $ \(Failure loc msg) -> do
+				case loc of
+					Just loc' -> do
+						hPutStr stderr "\t"
+						Data.Text.IO.hPutStr stderr (locationFile loc')
+						hPutStr stderr ":"
+						hPutStrLn stderr (show (locationLine loc'))
+					Nothing -> return ()
+				hPutStr stderr "\t\t"
+				Data.Text.IO.hPutStrLn stderr msg
+				hPutStr stderr "\n"
+			return (passed, skipped, failed + 1, errors)
+		TestResultError err -> do
+			hPutStr stderr "ERROR "
+			Data.Text.IO.hPutStrLn stderr name
+			hPutStr stderr "\t"
+			Data.Text.IO.hPutStrLn stderr err
+			hPutStr stderr "\n"
+			return (passed, skipped, failed, errors + 1)
+	put newState
 
 pure :: Bool -> String -> Assertion
 pure True _ = Assertion (return Nothing)
