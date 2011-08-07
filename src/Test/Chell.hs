@@ -92,9 +92,15 @@ suiteName :: Suite -> Text
 suiteName (Suite name _) = name
 suiteName (SuiteTest name _) = name
 
-suiteTests :: Suite -> [Test]
-suiteTests (Suite _ suites) = concatMap suiteTests suites
-suiteTests (SuiteTest _ t) = [t]
+suiteTests :: Suite -> [(Text, Test)]
+suiteTests = loop "" where
+	loop prefix s = let
+		name = if Data.Text.null prefix
+			then suiteName s
+			else Data.Text.concat [prefix, ".", suiteName s]
+		in case s of
+			Suite _ suites -> concatMap (loop name) suites
+			SuiteTest _ t -> [(name, t)]
 
 newtype Assertion = Assertion (IO (Maybe Text))
 
