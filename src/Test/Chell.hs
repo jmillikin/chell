@@ -490,33 +490,38 @@ textReport verbose h = do
 		{ reportStarted = return ()
 		, reportPassed = \name -> do
 			when verbose $ do
-				hPutStr h "PASS "
+				hPutStrLn h (replicate 70 '=')
+				hPutStr h "PASSED: "
 				Data.Text.IO.hPutStrLn h name
+				hPutStr h "\n"
 			incRef countPassed
 		, reportSkipped = \name -> do
 			when verbose $ do
-				hPutStr h "SKIP "
+				hPutStrLn h (replicate 70 '=')
+				hPutStr h "SKIPPED: "
 				Data.Text.IO.hPutStrLn h name
+				hPutStr h "\n"
 			incRef countSkipped
 		, reportFailed = \name fs -> do
-			hPutStr h "FAIL "
+			hPutStrLn h (replicate 70 '=')
+			hPutStr h "FAILED: "
 			Data.Text.IO.hPutStrLn h name
+			hPutStrLn h (replicate 70 '-')
 			forM_ fs $ \(Failure loc msg) -> do
 				case loc of
 					Just loc' -> do
-						hPutStr h "\t"
 						Data.Text.IO.hPutStr h (locationFile loc')
 						hPutStr h ":"
 						hPutStrLn h (show (locationLine loc'))
 					Nothing -> return ()
-				hPutStr h "\t\t"
 				Data.Text.IO.hPutStrLn h msg
 				hPutStr h "\n"
 			incRef countFailed
 		, reportAborted = \name msg -> do
-			hPutStr h "ABRT "
+			hPutStrLn h (replicate 70 '=')
+			hPutStr h "ABORTED: "
 			Data.Text.IO.hPutStrLn h name
-			hPutStr h "\t"
+			hPutStrLn h (replicate 70 '-')
 			Data.Text.IO.hPutStrLn h msg
 			hPutStr h "\n"
 			incRef countAborted
