@@ -321,7 +321,7 @@ usage name = "Usage: " ++ name ++ " [OPTION...]"
 defaultMain :: [Suite] -> IO ()
 defaultMain suites = do
 	args <- getArgs
-	let (options, _, optionErrors) = GetOpt.getOpt GetOpt.Permute optionInfo args
+	let (options, filters, optionErrors) = GetOpt.getOpt GetOpt.Permute optionInfo args
 	unless (null optionErrors) $ do
 		name <- getProgName
 		hPutStrLn stderr (concat optionErrors)
@@ -333,7 +333,10 @@ defaultMain suites = do
 		putStrLn (GetOpt.usageInfo (usage name) optionInfo)
 		exitSuccess
 	
-	let tests = concatMap suiteTests suites
+	let allTests = concatMap suiteTests suites
+	let tests = if null filters
+		then allTests
+		else filter (matchesFilter filters) allTests
 	allPassed <- withReports options $ do
 		ReportsM (mapM_ reportStarted)
 		allPassed <- foldM (\good t -> do
@@ -345,6 +348,12 @@ defaultMain suites = do
 	if allPassed
 		then exitSuccess
 		else exitFailure
+
+matchesFilter :: [String] -> (Text, Test) -> Bool
+matchesFilter strFilters = check where
+	filters = map Data.Text.pack strFilters
+	check (name, _) = any (matchName name) filters
+	matchName name f = f == name || Data.Text.isPrefixOf (Data.Text.append f ".") name
 
 data Report = Report
 	{ reportStarted :: IO ()
