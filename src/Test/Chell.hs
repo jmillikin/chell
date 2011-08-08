@@ -50,6 +50,8 @@ import qualified Control.Exception
 import           Control.Exception (Exception)
 import           Control.Monad (foldM, forM_, unless, when)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Data.Char (ord)
+import           Data.List (intercalate)
 import           Data.Maybe (isJust, isNothing)
 import           Data.IORef (newIORef, readIORef, atomicModifyIORef)
 import qualified Data.Text
@@ -60,6 +62,7 @@ import           System.Environment (getArgs, getProgName)
 import           System.Exit (exitSuccess, exitFailure)
 import           System.IO (Handle, stderr, hPutStr, hPutStrLn)
 import qualified System.IO as IO
+import           Text.Printf (printf)
 
 import qualified Language.Haskell.TH as TH
 
@@ -206,6 +209,7 @@ data Option
 	= OptionHelp
 	| OptionVerbose
 	| OptionXmlReport FilePath
+	| OptionJsonReport FilePath
 	| OptionLog FilePath
 	deriving (Show, Eq)
 
@@ -222,6 +226,10 @@ optionInfo =
 	, GetOpt.Option [] ["xml-report"]
 	  (GetOpt.ReqArg OptionXmlReport "PATH")
 	  "write a parsable report to a file, in XML"
+	
+	, GetOpt.Option [] ["json-report"]
+	  (GetOpt.ReqArg OptionJsonReport "PATH")
+	  "write a parsable report to a file, in JSON"
 	
 	, GetOpt.Option [] ["log"]
 	  (GetOpt.ReqArg OptionLog "PATH")
@@ -267,6 +275,65 @@ data Report = Report
 	, reportAborted :: Text -> Text -> IO ()
 	, reportFinished :: IO ()
 	}
+
+jsonReport :: Handle -> IO Report
+jsonReport h = do
+	commaRef <- newIORef False
+	let comma = do
+		needComma <- atomicModifyIORef commaRef (\c -> (True, c))
+		if needComma
+			then hPutStr h ", "
+			else hPutStr h "  "
+	return (Report
+		{ reportStarted = do
+			hPutStrLn h "{\"test-runs\": [ "
+		, reportPassed = \name -> do
+			comma
+			hPutStr h "{\"test\": \""
+			hPutStr h (escapeJSON name)
+			hPutStrLn h "\", \"result\": \"passed\"}"
+		, reportSkipped = \name -> do
+			comma
+			hPutStr h "{\"test\": \""
+			hPutStr h (escapeJSON name)
+			hPutStrLn h "\", \"result\": \"skipped\"}"
+		, reportFailed = \name fs -> do
+			comma
+			hPutStr h "{\"test\": \""
+			hPutStr h (escapeJSON name)
+			hPutStrLn h "\", \"result\": \"failed\", \"failures\": ["
+			hPutStrLn h (intercalate "\n, " (do
+				Failure loc msg <- fs
+				let locString = case loc of
+					Just loc' -> concat
+						[ ", \"location\": {\"module\": \""
+						, escapeJSON (locationModule loc')
+						, "\", \"file\": \""
+						, escapeJSON (locationFile loc')
+						, "\", \"line\": "
+						, show (locationLine loc')
+						, "}"
+						]
+					Nothing -> ""
+				return ("{\"message\": \"" ++ escapeJSON msg ++ "\"" ++ locString ++ "}")))
+			hPutStrLn h "]}"
+		, reportAborted = \name msg -> do
+			comma
+			hPutStr h "{\"test\": \""
+			hPutStr h (escapeJSON name)
+			hPutStr h "\", \"result\": \"aborted\", \"abortion\": {\"message\": \""
+			hPutStr h (escapeJSON msg)
+			hPutStrLn h "\"}}"
+		, reportFinished = do
+			hPutStrLn h "]}"
+		})
+
+escapeJSON :: Text -> String
+escapeJSON = concatMap (\c -> case c of
+	'"' -> "\\\""
+	'\\' -> "\\\\"
+	_ | ord c <= 0x1F -> printf "\\u%04X" (ord c)
+	_ -> [c]) . Data.Text.unpack
 
 xmlReport :: Handle -> Report
 xmlReport h = Report
@@ -392,6 +459,8 @@ withReports opts reportsm = do
 	    loop (o:os) reports = case o of
 	    	OptionXmlReport path -> IO.withBinaryFile path IO.WriteMode
 	    		(\h -> loop os (xmlReport h : reports))
+	    	OptionJsonReport path -> IO.withBinaryFile path IO.WriteMode
+	    		(\h -> jsonReport h >>= \r -> loop os (r : reports))
 	    	OptionLog path -> IO.withBinaryFile path IO.WriteMode
 	    		(\h -> textReport True h >>= \r -> loop os (r : reports))
 	    	_ -> loop os reports
