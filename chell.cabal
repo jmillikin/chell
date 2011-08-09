@@ -21,6 +21,7 @@ library
 
   build-depends:
       base >= 4 && < 5
+    , random
     , template-haskell >= 2.3 && < 2.6
     , text >= 0.7
     , transformers >= 0.2 && < 0.3

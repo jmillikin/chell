@@ -65,6 +65,7 @@ import           System.Environment (getArgs, getProgName)
 import           System.Exit (exitSuccess, exitFailure)
 import           System.IO (Handle, stderr, hPutStr, hPutStrLn)
 import qualified System.IO as IO
+import           System.Random (randomIO)
 import           Text.Printf (printf)
 
 import qualified Language.Haskell.TH as TH
@@ -72,6 +73,8 @@ import qualified Language.Haskell.TH as TH
 newtype Test = Test (TestOptions -> IO TestResult)
 
 data TestOptions = TestOptions
+	{ testOptionSeed :: Int
+	}
 
 runTest :: Test -> TestOptions -> IO TestResult
 runTest (Test io) = io
@@ -291,6 +294,7 @@ data Option
 	| OptionXmlReport FilePath
 	| OptionJsonReport FilePath
 	| OptionLog FilePath
+	| OptionSeed Int
 	deriving (Show, Eq)
 
 optionInfo :: [GetOpt.OptDescr Option]
@@ -314,7 +318,24 @@ optionInfo =
 	, GetOpt.Option [] ["log"]
 	  (GetOpt.ReqArg OptionLog "PATH")
 	  "write a full log (always max verbosity) to a file path"
+	
+	, GetOpt.Option [] ["seed"]
+	  (GetOpt.ReqArg (\s -> case parseInt s of
+	   	Just x -> OptionSeed x
+	   	Nothing -> error ("Failed to parse --seed value " ++ show s)) "SEED")
+	  "the seed used for random numbers in (for example) quickcheck"
+	
 	]
+
+parseInt :: String -> Maybe Int
+parseInt s = case [x | (x, "") <- reads s] of
+	[x] -> Just x
+	_ -> Nothing
+
+getSeedOpt :: [Option] -> Maybe Int
+getSeedOpt [] = Nothing
+getSeedOpt ((OptionSeed s) : _) = Just s
+getSeedOpt (_:os) = getSeedOpt os
 
 usage :: String -> String
 usage name = "Usage: " ++ name ++ " [OPTION...]"
@@ -340,7 +361,15 @@ defaultMain suites = do
 	let tests = if null filters
 		then allTests
 		else filter (matchesFilter filters) allTests
+	
+	seed <- case getSeedOpt options of
+		Just s -> return s
+		Nothing -> randomIO
+	
 	let testOptions = TestOptions
+		{ testOptionSeed = seed
+		}
+	
 	allPassed <- withReports options $ do
 		ReportsM (mapM_ reportStarted)
 		allPassed <- foldM (\good t -> do
