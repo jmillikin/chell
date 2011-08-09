@@ -28,3 +28,7 @@ library
 
   exposed-modules:
     Test.Chell
+
+  other-modules:
+    Test.Chell.Main
+    Test.Chell.Types
