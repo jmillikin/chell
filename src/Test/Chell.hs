@@ -34,6 +34,7 @@ module Test.Chell
 	, expect
 	, Test.Chell.fail
 	, trace
+	, note
 	
 	-- ** Assertions
 	, equal
@@ -80,10 +81,10 @@ runTest :: Test -> TestOptions -> IO TestResult
 runTest (Test io) = io
 
 data TestResult
-	= TestPassed
+	= TestPassed [(Text, Text)]
 	| TestSkipped
-	| TestFailed [Failure]
-	| TestAborted Text
+	| TestFailed [(Text, Text)] [Failure]
+	| TestAborted [(Text, Text)] Text
 
 data Failure = Failure (Maybe Location) Text
 
@@ -173,7 +174,8 @@ instance IsAssertion Bool where
 		else AssertionFailed "boolean assertion failed"))
 
 type Assertions = TestM ()
-newtype TestM a = TestM { unTestM :: [Failure] -> IO (Maybe a, [Failure]) }
+type TestState = ([(Text, Text)], [Failure])
+newtype TestM a = TestM { unTestM :: TestState -> IO (Maybe a, TestState) }
 
 instance Functor TestM where
 	fmap = liftM
@@ -202,17 +204,17 @@ instance MonadIO TestM where
 assertions :: Assertions -> Test
 assertions testm = Test io where
 	io _ = do
-		tried <- Control.Exception.try (unTestM testm [])
+		tried <- Control.Exception.try (unTestM testm ([], []))
 		return $ case tried of
-			Left exc -> TestAborted (errorExc exc)
-			Right (_, []) -> TestPassed
-			Right (_, fs) -> TestFailed fs
+			Left exc -> TestAborted [] (errorExc exc)
+			Right (_, (notes, [])) -> TestPassed (reverse notes)
+			Right (_, (notes, fs)) -> TestFailed (reverse notes) (reverse fs)
 	
 	errorExc :: Control.Exception.SomeException -> Text
 	errorExc exc = Data.Text.pack ("Test aborted due to exception: " ++ show exc)
 
 addFailure :: Maybe TH.Loc -> Bool -> Text -> Assertions
-addFailure maybe_loc fatal msg = TestM $ \fs -> do
+addFailure maybe_loc fatal msg = TestM $ \(notes, fs) -> do
 	let loc = do
 		th_loc <- maybe_loc
 		return $ Location
@@ -221,7 +223,7 @@ addFailure maybe_loc fatal msg = TestM $ \fs -> do
 			, locationLine = toInteger (fst (TH.loc_start th_loc))
 			}
 	return ( if fatal then Nothing else Just ()
-	       , Failure loc msg : fs)
+	       , (notes, Failure loc msg : fs))
 
 -- | Cause a test to immediately fail, with a message.
 --
@@ -241,6 +243,10 @@ fail = do
 -- so you don't have to import @Debug.Trace@.
 trace :: Text -> Assertions
 trace msg = liftIO (Data.Text.IO.putStrLn msg)
+
+-- | Attach metadata to a test run. This will be included in reports.
+note :: Text -> Text -> Assertions
+note key value = TestM (\(notes, fs) -> return (Just (), ((key, value) : notes, fs)))
 
 liftLoc :: TH.Loc -> TH.Q TH.Exp
 liftLoc loc = [| TH.Loc filename package module_ start end |] where
@@ -390,10 +396,10 @@ matchesFilter strFilters = check where
 
 data Report = Report
 	{ reportStarted :: IO ()
-	, reportPassed :: Text -> IO ()
+	, reportPassed :: Text -> [(Text, Text)] -> IO ()
 	, reportSkipped :: Text -> IO ()
-	, reportFailed :: Text -> [Failure] -> IO ()
-	, reportAborted :: Text -> Text -> IO ()
+	, reportFailed :: Text -> [(Text, Text)] -> [Failure] -> IO ()
+	, reportAborted :: Text -> [(Text, Text)] -> Text -> IO ()
 	, reportFinished :: IO ()
 	}
 
@@ -405,20 +411,34 @@ jsonReport h = do
 		if needComma
 			then hPutStr h ", "
 			else hPutStr h "  "
+	let putNotes notes = do
+		hPutStr h ", \"notes\": [\n"
+		hPutStr h (intercalate "\n, " (do
+			(key, value) <- notes
+			return (concat
+				[ "{\"key\": \""
+				, escapeJSON key
+				, "\", \"value\": \""
+				, escapeJSON value
+				, "\"}\n"
+				])))
+		hPutStrLn h "]"
 	return (Report
 		{ reportStarted = do
 			hPutStrLn h "{\"test-runs\": [ "
-		, reportPassed = \name -> do
+		, reportPassed = \name notes -> do
 			comma
 			hPutStr h "{\"test\": \""
 			hPutStr h (escapeJSON name)
-			hPutStrLn h "\", \"result\": \"passed\"}"
+			hPutStr h "\", \"result\": \"passed\""
+			putNotes notes
+			hPutStrLn h "}"
 		, reportSkipped = \name -> do
 			comma
 			hPutStr h "{\"test\": \""
 			hPutStr h (escapeJSON name)
 			hPutStrLn h "\", \"result\": \"skipped\"}"
-		, reportFailed = \name fs -> do
+		, reportFailed = \name notes fs -> do
 			comma
 			hPutStr h "{\"test\": \""
 			hPutStr h (escapeJSON name)
@@ -437,14 +457,18 @@ jsonReport h = do
 						]
 					Nothing -> ""
 				return ("{\"message\": \"" ++ escapeJSON msg ++ "\"" ++ locString ++ "}")))
-			hPutStrLn h "]}"
-		, reportAborted = \name msg -> do
+			hPutStr h "]"
+			putNotes notes
+			hPutStrLn h "}"
+		, reportAborted = \name notes msg -> do
 			comma
 			hPutStr h "{\"test\": \""
 			hPutStr h (escapeJSON name)
 			hPutStr h "\", \"result\": \"aborted\", \"abortion\": {\"message\": \""
 			hPutStr h (escapeJSON msg)
-			hPutStrLn h "\"}}"
+			hPutStr h "\"}"
+			putNotes notes
+			hPutStrLn h "}"
 		, reportFinished = do
 			hPutStrLn h "]}"
 		})
@@ -461,15 +485,17 @@ xmlReport h = Report
 	{ reportStarted = do
 		hPutStrLn h "<?xml version=\"1.0\" encoding=\"utf8\"?>"
 		hPutStrLn h "<report xmlns='urn:john-millikin:chell:report:1'>"
-	, reportPassed = \name -> do
+	, reportPassed = \name notes -> do
 		hPutStr h "\t<test-run test='"
 		hPutStr h (escapeXML name)
-		hPutStrLn h "' result='passed'/>"
+		hPutStrLn h "' result='passed'>"
+		putNotes notes
+		hPutStrLn h "\t</test-run>"
 	, reportSkipped = \name -> do
 		hPutStr h "\t<test-run test='"
 		hPutStr h (escapeXML name)
 		hPutStrLn h "' result='skipped'/>"
-	, reportFailed = \name fs -> do
+	, reportFailed = \name notes fs -> do
 		hPutStr h "\t<test-run test='"
 		hPutStr h (escapeXML name)
 		hPutStrLn h "' result='failed'>"
@@ -488,18 +514,26 @@ xmlReport h = Report
 					hPutStrLn h "'/>"
 					hPutStrLn h "\t\t</failure>"
 				Nothing -> hPutStrLn h "'/>"
+		putNotes notes
 		hPutStrLn h "\t</test-run>"
-	, reportAborted = \name msg -> do
+	, reportAborted = \name notes msg -> do
 		hPutStr h "\t<test-run test='"
 		hPutStr h (escapeXML name)
 		hPutStrLn h "' result='aborted'>"
 		hPutStr h "\t\t<abortion message='"
 		hPutStr h (escapeXML msg)
 		hPutStrLn h "'/>"
+		putNotes notes
 		hPutStrLn h "\t</test-run>"
 	, reportFinished = do
 		hPutStrLn h "</report>"
-	}
+	} where
+		putNotes notes = forM_ notes $ \(key, value) -> do
+			hPutStr h "\t\t<note key=\""
+			hPutStr h (escapeXML key)
+			hPutStr h "\" value=\""
+			hPutStr h (escapeXML value)
+			hPutStrLn h "\"/>"
 
 escapeXML :: Text -> String
 escapeXML = concatMap (\c -> case c of
@@ -519,13 +553,19 @@ textReport verbose h = do
 	
 	let incRef ref = atomicModifyIORef ref (\a -> (a + 1, ()))
 	
+	let putNotes notes = forM_ notes $ \(key, value) -> do
+		Data.Text.IO.hPutStr h key
+		hPutStr h "="
+		Data.Text.IO.hPutStrLn h value
+	
 	return (Report
 		{ reportStarted = return ()
-		, reportPassed = \name -> do
+		, reportPassed = \name notes -> do
 			when verbose $ do
 				hPutStrLn h (replicate 70 '=')
 				hPutStr h "PASSED: "
 				Data.Text.IO.hPutStrLn h name
+				putNotes notes
 				hPutStr h "\n"
 			incRef countPassed
 		, reportSkipped = \name -> do
@@ -535,10 +575,11 @@ textReport verbose h = do
 				Data.Text.IO.hPutStrLn h name
 				hPutStr h "\n"
 			incRef countSkipped
-		, reportFailed = \name fs -> do
+		, reportFailed = \name notes fs -> do
 			hPutStrLn h (replicate 70 '=')
 			hPutStr h "FAILED: "
 			Data.Text.IO.hPutStrLn h name
+			putNotes notes
 			hPutStrLn h (replicate 70 '-')
 			forM_ fs $ \(Failure loc msg) -> do
 				case loc of
@@ -550,10 +591,11 @@ textReport verbose h = do
 				Data.Text.IO.hPutStrLn h msg
 				hPutStr h "\n"
 			incRef countFailed
-		, reportAborted = \name msg -> do
+		, reportAborted = \name notes msg -> do
 			hPutStrLn h (replicate 70 '=')
 			hPutStr h "ABORTED: "
 			Data.Text.IO.hPutStrLn h name
+			putNotes notes
 			hPutStrLn h (replicate 70 '-')
 			Data.Text.IO.hPutStrLn h msg
 			hPutStr h "\n"
@@ -609,30 +651,30 @@ reportTest :: TestOptions -> (Text, Test) -> ReportsM Bool
 reportTest options (name, t) = do
 	result <- liftIO (runTest t options)
 	case result of
-		TestPassed -> do
-			passed name
+		TestPassed notes -> do
+			passed name notes
 			return True
 		TestSkipped -> do
 			skipped name
 			return True
-		TestFailed fs -> do
-			failed name fs
+		TestFailed notes fs -> do
+			failed name notes fs
 			return False
-		TestAborted msg -> do
-			aborted name msg
+		TestAborted notes msg -> do
+			aborted name notes msg
 			return False
 
-passed :: Text -> ReportsM ()
-passed name = ReportsM (mapM_ (\r -> reportPassed r name))
+passed :: Text -> [(Text, Text)] -> ReportsM ()
+passed name notes = ReportsM (mapM_ (\r -> reportPassed r name notes))
 
 skipped :: Text -> ReportsM ()
 skipped name = ReportsM (mapM_ (\r -> reportSkipped r name))
 
-failed :: Text -> [Failure] -> ReportsM ()
-failed name fs = ReportsM (mapM_ (\r -> reportFailed r name fs))
+failed :: Text -> [(Text, Text)] -> [Failure] -> ReportsM ()
+failed name notes fs = ReportsM (mapM_ (\r -> reportFailed r name notes fs))
 
-aborted :: Text -> Text -> ReportsM ()
-aborted name msg = ReportsM (mapM_ (\r -> reportAborted r name msg))
+aborted :: Text -> [(Text, Text)] -> Text -> ReportsM ()
+aborted name notes msg = ReportsM (mapM_ (\r -> reportAborted r name notes msg))
 
 pure :: Bool -> String -> Assertion
 pure True _ = Assertion (return AssertionPassed)
