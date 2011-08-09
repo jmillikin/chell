@@ -13,8 +13,8 @@ module Test.Chell
 	, TestResult (..)
 	, Failure (..)
 	, Location (..)
-	, skip
 	, skipIf
+	, skipWhen
 	
 	-- ** Suites
 	, Suite
@@ -71,14 +71,17 @@ import           Text.Printf (printf)
 
 import qualified Language.Haskell.TH as TH
 
-newtype Test = Test (TestOptions -> IO TestResult)
+data Test = Test Text (TestOptions -> IO TestResult)
 
 data TestOptions = TestOptions
 	{ testOptionSeed :: Int
 	}
 
+testName :: Test -> Text
+testName (Test name _) = name
+
 runTest :: Test -> TestOptions -> IO TestResult
-runTest (Test io) = io
+runTest (Test _ io) = io
 
 data TestResult
 	= TestPassed [(Text, Text)]
@@ -99,35 +102,35 @@ data Location = Location
 --
 -- @
 --tests = 'suite' \"tests\"
---    [ 'test' \"windows-specific\" $ if onWindows
---        then test_WindowsSpecific
---        else 'skip'
+--    [ 'test' ('skipIf' onWindows test_WindowsSpecific)
 --    ]
 -- @
 --
-skip :: Test
-skip = Test (\_ -> return TestSkipped)
+skipIf :: Bool -> Test -> Test
+skipIf skip t@(Test name _) = if skip
+	then Test name (\_ -> return TestSkipped)
+	else t
 
 -- | Potentially skip a test, depending on the result of a runtime check.
 --
 -- @
 --tests = 'suite' \"tests\"
---    [ 'test' \"ping-google\" ('skipIf' noNetwork test_PingGoogle)
+--    [ 'test' ('skipWhen' noNetwork test_PingGoogle)
 --    ]
 -- @
-skipIf :: IO Bool -> Test -> Test
-skipIf p t = Test $ \options -> do
+skipWhen :: IO Bool -> Test -> Test
+skipWhen p (Test name io) = Test name $ \options -> do
 	skipThis <- p
 	if skipThis
 		then return TestSkipped
-		else runTest t options
+		else io options
 
 -- | Running a 'Test' requires it to be contained in a 'Suite'. This gives
 -- the test a name, so users know which test failed.
 data Suite = Suite Text [Suite]
-           | SuiteTest Text Test
+           | SuiteTest Test
 
-test :: Text -> Test -> Suite
+test :: Test -> Suite
 test = SuiteTest
 
 suite :: Text -> [Suite] -> Suite
@@ -135,12 +138,12 @@ suite = Suite
 
 suiteName :: Suite -> Text
 suiteName (Suite name _) = name
-suiteName (SuiteTest name _) = name
+suiteName (SuiteTest t) = testName t
 
 -- | The full list of 'Test's contained within this 'Suite'. Each 'Test'
--- is returned along with its full name, which includes the name of its
--- parent 'Suite's.
-suiteTests :: Suite -> [(Text, Test)]
+-- is returned with its name modified to include the name of its parent
+-- 'Suite's.
+suiteTests :: Suite -> [Test]
 suiteTests = loop "" where
 	loop prefix s = let
 		name = if Data.Text.null prefix
@@ -148,7 +151,7 @@ suiteTests = loop "" where
 			else Data.Text.concat [prefix, ".", suiteName s]
 		in case s of
 			Suite _ suites -> concatMap (loop name) suites
-			SuiteTest _ t -> [(name, t)]
+			SuiteTest (Test _ io) -> [Test name io]
 
 -- $doc-basic-testing
 --
@@ -197,12 +200,12 @@ instance MonadIO TestM where
 --
 -- @
 -- test_Equality :: Test
--- test_Equality = assertions $ do
+-- test_Equality = assertions \"equality\" $ do
 --     $assert (1 == 1)
 --     $assert (equal 1 1)
 -- @
-assertions :: Assertions -> Test
-assertions testm = Test io where
+assertions :: Text -> Assertions -> Test
+assertions name testm = Test name io where
 	io _ = do
 		tried <- Control.Exception.try (unTestM testm ([], []))
 		return $ case tried of
@@ -388,10 +391,10 @@ defaultMain suites = do
 		then exitSuccess
 		else exitFailure
 
-matchesFilter :: [String] -> (Text, Test) -> Bool
+matchesFilter :: [String] -> Test -> Bool
 matchesFilter strFilters = check where
 	filters = map Data.Text.pack strFilters
-	check (name, _) = any (matchName name) filters
+	check t = any (matchName (testName t)) filters
 	matchName name f = f == name || Data.Text.isPrefixOf (Data.Text.append f ".") name
 
 data Report = Report
@@ -638,8 +641,9 @@ instance Monad ReportsM where
 instance MonadIO ReportsM where
 	liftIO io = ReportsM (\_ -> io)
 
-reportTest :: TestOptions -> (Text, Test) -> ReportsM Bool
-reportTest options (name, t) = do
+reportTest :: TestOptions -> Test -> ReportsM Bool
+reportTest options t = do
+	let name = testName t
 	let notify io = ReportsM (mapM_ io)
 	
 	notify (\r -> reportStartTest r name)
