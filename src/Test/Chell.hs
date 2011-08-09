@@ -9,6 +9,7 @@ module Test.Chell
 	
 	-- ** Tests
 	, Test (..)
+	, TestOptions (..)
 	, TestResult (..)
 	, Failure (..)
 	, Location (..)
@@ -68,9 +69,11 @@ import           Text.Printf (printf)
 
 import qualified Language.Haskell.TH as TH
 
-newtype Test = Test (IO TestResult)
+newtype Test = Test (TestOptions -> IO TestResult)
 
-runTest :: Test -> IO TestResult
+data TestOptions = TestOptions
+
+runTest :: Test -> TestOptions -> IO TestResult
 runTest (Test io) = io
 
 data TestResult
@@ -99,7 +102,7 @@ data Location = Location
 -- @
 --
 skip :: Test
-skip = Test (return TestSkipped)
+skip = Test (\_ -> return TestSkipped)
 
 -- | Potentially skip a test, depending on the result of a runtime check.
 --
@@ -109,11 +112,11 @@ skip = Test (return TestSkipped)
 --    ]
 -- @
 skipIf :: IO Bool -> Test -> Test
-skipIf p t = Test $ do
+skipIf p t = Test $ \options -> do
 	skipThis <- p
 	if skipThis
 		then return TestSkipped
-		else runTest t
+		else runTest t options
 
 -- | Running a 'Test' requires it to be contained in a 'Suite'. This gives
 -- the test a name, so users know which test failed.
@@ -195,7 +198,7 @@ instance MonadIO TestM where
 -- @
 assertions :: Assertions -> Test
 assertions testm = Test io where
-	io = do
+	io _ = do
 		tried <- Control.Exception.try (unTestM testm [])
 		return $ case tried of
 			Left exc -> TestAborted (errorExc exc)
@@ -337,10 +340,11 @@ defaultMain suites = do
 	let tests = if null filters
 		then allTests
 		else filter (matchesFilter filters) allTests
+	let testOptions = TestOptions
 	allPassed <- withReports options $ do
 		ReportsM (mapM_ reportStarted)
 		allPassed <- foldM (\good t -> do
-			thisGood <- reportTest t
+			thisGood <- reportTest testOptions t
 			return (good && thisGood)) True tests
 		ReportsM (mapM_ reportFinished)
 		return allPassed
@@ -572,9 +576,9 @@ instance Monad ReportsM where
 instance MonadIO ReportsM where
 	liftIO io = ReportsM (\_ -> io)
 
-reportTest :: (Text, Test) -> ReportsM Bool
-reportTest (name, t) = do
-	result <- liftIO (runTest t)
+reportTest :: TestOptions -> (Text, Test) -> ReportsM Bool
+reportTest options (name, t) = do
+	result <- liftIO (runTest t options)
 	case result of
 		TestPassed -> do
 			passed name
