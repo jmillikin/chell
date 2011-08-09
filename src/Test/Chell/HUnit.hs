@@ -28,7 +28,7 @@ hunit name io = Chell.test name (Chell.Test chell_io) where
 	chell_io _ = do
 		result <- performTestCase io
 		return $ case result of
-			Nothing -> Chell.TestPassed
+			Nothing -> Chell.TestPassed []
 			Just err -> parseError err
-	parseError (True, msg) = Chell.TestFailed [Chell.Failure Nothing (pack msg)]
-	parseError (False, msg) = Chell.TestAborted (pack msg)
+	parseError (True, msg) = Chell.TestFailed [] [Chell.Failure Nothing (pack msg)]
+	parseError (False, msg) = Chell.TestAborted [] (pack msg)
