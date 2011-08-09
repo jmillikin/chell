@@ -29,7 +29,7 @@ import qualified Test.QuickCheck.Text as Text
 --    ]
 -- @
 property :: QuickCheck.Testable prop => Text -> prop -> Chell.Suite
-property name prop = Chell.test name (Chell.Test chell_io) where
+property name prop = Chell.test (Chell.Test name chell_io) where
 	chell_io opts = do
 		let seed = Chell.testOptionSeed opts
 		
