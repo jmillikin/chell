@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Test.Chell.QuickCheck
 	( property
 	) where
@@ -54,9 +56,16 @@ property name prop = Chell.test name (Chell.Test chell_io) where
 		let output = pack (Test.output result)
 		return $ case result of
 			Test.Success{} -> Chell.TestPassed
-			Test.Failure{} -> Chell.TestFailed [Chell.Failure Nothing output]
-			Test.GaveUp{} -> Chell.TestAborted output
-			Test.NoExpectedFailure{} -> Chell.TestFailed [Chell.Failure Nothing output]
+				[("seed", pack (show seed))]
+			Test.Failure{} -> Chell.TestFailed
+				[("seed", pack (show seed))]
+				[Chell.Failure Nothing output]
+			Test.GaveUp{} -> Chell.TestAborted
+				[("seed", pack (show seed))]
+				output
+			Test.NoExpectedFailure{} -> Chell.TestFailed
+				[("seed", pack (show seed))]
+				[Chell.Failure Nothing output]
 
 -- copied from quickcheck-2.4.1.1/src/Test/QuickCheck/Test.hs
 computeSize :: Int -> Int -> Int -> Int -> Int
