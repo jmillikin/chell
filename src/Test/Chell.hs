@@ -377,11 +377,11 @@ defaultMain suites = do
 		}
 	
 	allPassed <- withReports options $ do
-		ReportsM (mapM_ reportStarted)
+		ReportsM (mapM_ reportStart)
 		allPassed <- foldM (\good t -> do
 			thisGood <- reportTest testOptions t
 			return (good && thisGood)) True tests
-		ReportsM (mapM_ reportFinished)
+		ReportsM (mapM_ reportFinish)
 		return allPassed
 	
 	if allPassed
@@ -395,12 +395,10 @@ matchesFilter strFilters = check where
 	matchName name f = f == name || Data.Text.isPrefixOf (Data.Text.append f ".") name
 
 data Report = Report
-	{ reportStarted :: IO ()
-	, reportPassed :: Text -> [(Text, Text)] -> IO ()
-	, reportSkipped :: Text -> IO ()
-	, reportFailed :: Text -> [(Text, Text)] -> [Failure] -> IO ()
-	, reportAborted :: Text -> [(Text, Text)] -> Text -> IO ()
-	, reportFinished :: IO ()
+	{ reportStart :: IO ()
+	, reportStartTest :: Text -> IO ()
+	, reportFinishTest :: Text -> TestResult -> IO ()
+	, reportFinish :: IO ()
 	}
 
 jsonReport :: Handle -> IO Report
@@ -424,52 +422,46 @@ jsonReport h = do
 				])))
 		hPutStrLn h "]"
 	return (Report
-		{ reportStarted = do
+		{ reportStart = do
 			hPutStrLn h "{\"test-runs\": [ "
-		, reportPassed = \name notes -> do
+		, reportStartTest = \name -> do
 			comma
 			hPutStr h "{\"test\": \""
 			hPutStr h (escapeJSON name)
-			hPutStr h "\", \"result\": \"passed\""
-			putNotes notes
-			hPutStrLn h "}"
-		, reportSkipped = \name -> do
-			comma
-			hPutStr h "{\"test\": \""
-			hPutStr h (escapeJSON name)
-			hPutStrLn h "\", \"result\": \"skipped\"}"
-		, reportFailed = \name notes fs -> do
-			comma
-			hPutStr h "{\"test\": \""
-			hPutStr h (escapeJSON name)
-			hPutStrLn h "\", \"result\": \"failed\", \"failures\": ["
-			hPutStrLn h (intercalate "\n, " (do
-				Failure loc msg <- fs
-				let locString = case loc of
-					Just loc' -> concat
-						[ ", \"location\": {\"module\": \""
-						, escapeJSON (locationModule loc')
-						, "\", \"file\": \""
-						, escapeJSON (locationFile loc')
-						, "\", \"line\": "
-						, show (locationLine loc')
-						, "}"
-						]
-					Nothing -> ""
-				return ("{\"message\": \"" ++ escapeJSON msg ++ "\"" ++ locString ++ "}")))
-			hPutStr h "]"
-			putNotes notes
-			hPutStrLn h "}"
-		, reportAborted = \name notes msg -> do
-			comma
-			hPutStr h "{\"test\": \""
-			hPutStr h (escapeJSON name)
-			hPutStr h "\", \"result\": \"aborted\", \"abortion\": {\"message\": \""
-			hPutStr h (escapeJSON msg)
-			hPutStr h "\"}"
-			putNotes notes
-			hPutStrLn h "}"
-		, reportFinished = do
+			hPutStr h "\", \"result\": \""
+		, reportFinishTest = \_ result -> case result of
+			TestPassed notes -> do
+				hPutStr h "passed\""
+				putNotes notes
+				hPutStrLn h "}"
+			TestSkipped -> do
+				hPutStrLn h "skipped\"}"
+			TestFailed notes fs -> do
+				hPutStrLn h "failed\", \"failures\": ["
+				hPutStrLn h (intercalate "\n, " (do
+					Failure loc msg <- fs
+					let locString = case loc of
+						Just loc' -> concat
+							[ ", \"location\": {\"module\": \""
+							, escapeJSON (locationModule loc')
+							, "\", \"file\": \""
+							, escapeJSON (locationFile loc')
+							, "\", \"line\": "
+							, show (locationLine loc')
+							, "}"
+							]
+						Nothing -> ""
+					return ("{\"message\": \"" ++ escapeJSON msg ++ "\"" ++ locString ++ "}")))
+				hPutStr h "]"
+				putNotes notes
+				hPutStrLn h "}"
+			TestAborted notes msg -> do
+				hPutStr h "aborted\", \"abortion\": {\"message\": \""
+				hPutStr h (escapeJSON msg)
+				hPutStr h "\"}"
+				putNotes notes
+				hPutStrLn h "}"
+		, reportFinish = do
 			hPutStrLn h "]}"
 		})
 
@@ -482,50 +474,47 @@ escapeJSON = concatMap (\c -> case c of
 
 xmlReport :: Handle -> Report
 xmlReport h = Report
-	{ reportStarted = do
+	{ reportStart = do
 		hPutStrLn h "<?xml version=\"1.0\" encoding=\"utf8\"?>"
 		hPutStrLn h "<report xmlns='urn:john-millikin:chell:report:1'>"
-	, reportPassed = \name notes -> do
+	, reportStartTest = \name -> do
 		hPutStr h "\t<test-run test='"
 		hPutStr h (escapeXML name)
-		hPutStrLn h "' result='passed'>"
-		putNotes notes
-		hPutStrLn h "\t</test-run>"
-	, reportSkipped = \name -> do
-		hPutStr h "\t<test-run test='"
-		hPutStr h (escapeXML name)
-		hPutStrLn h "' result='skipped'/>"
-	, reportFailed = \name notes fs -> do
-		hPutStr h "\t<test-run test='"
-		hPutStr h (escapeXML name)
-		hPutStrLn h "' result='failed'>"
-		forM_ fs $ \(Failure loc msg) -> do
-			hPutStr h "\t\t<failure message='"
+		hPutStr h "' result='"
+	, reportFinishTest = \_ result -> case result of
+		TestPassed notes -> do
+			hPutStrLn h "passed'>"
+			putNotes notes
+			hPutStrLn h "\t</test-run>"
+		TestSkipped -> do
+			hPutStrLn h "skipped'/>"
+		TestFailed notes fs -> do
+			hPutStrLn h "failed'>"
+			forM_ fs $ \(Failure loc msg) -> do
+				hPutStr h "\t\t<failure message='"
+				hPutStr h (escapeXML msg)
+				case loc of
+					Just loc' -> do
+						hPutStrLn h "'>"
+						hPutStr h "\t\t\t<location module='"
+						hPutStr h (escapeXML (locationModule loc'))
+						hPutStr h "' file='"
+						hPutStr h (escapeXML (locationFile loc'))
+						hPutStr h "' line='"
+						hPutStr h (show (locationLine loc'))
+						hPutStrLn h "'/>"
+						hPutStrLn h "\t\t</failure>"
+					Nothing -> hPutStrLn h "'/>"
+			putNotes notes
+			hPutStrLn h "\t</test-run>"
+		TestAborted notes msg -> do
+			hPutStrLn h "aborted'>"
+			hPutStr h "\t\t<abortion message='"
 			hPutStr h (escapeXML msg)
-			case loc of
-				Just loc' -> do
-					hPutStrLn h "'>"
-					hPutStr h "\t\t\t<location module='"
-					hPutStr h (escapeXML (locationModule loc'))
-					hPutStr h "' file='"
-					hPutStr h (escapeXML (locationFile loc'))
-					hPutStr h "' line='"
-					hPutStr h (show (locationLine loc'))
-					hPutStrLn h "'/>"
-					hPutStrLn h "\t\t</failure>"
-				Nothing -> hPutStrLn h "'/>"
-		putNotes notes
-		hPutStrLn h "\t</test-run>"
-	, reportAborted = \name notes msg -> do
-		hPutStr h "\t<test-run test='"
-		hPutStr h (escapeXML name)
-		hPutStrLn h "' result='aborted'>"
-		hPutStr h "\t\t<abortion message='"
-		hPutStr h (escapeXML msg)
-		hPutStrLn h "'/>"
-		putNotes notes
-		hPutStrLn h "\t</test-run>"
-	, reportFinished = do
+			hPutStrLn h "'/>"
+			putNotes notes
+			hPutStrLn h "\t</test-run>"
+	, reportFinish = do
 		hPutStrLn h "</report>"
 	} where
 		putNotes notes = forM_ notes $ \(key, value) -> do
@@ -559,48 +548,50 @@ textReport verbose h = do
 		Data.Text.IO.hPutStrLn h value
 	
 	return (Report
-		{ reportStarted = return ()
-		, reportPassed = \name notes -> do
-			when verbose $ do
+		{ reportStart = return ()
+		, reportStartTest = \_ -> return ()
+		, reportFinishTest = \name result -> case result of
+			TestPassed notes -> do
+				when verbose $ do
+					hPutStrLn h (replicate 70 '=')
+					hPutStr h "PASSED: "
+					Data.Text.IO.hPutStrLn h name
+					putNotes notes
+					hPutStr h "\n"
+				incRef countPassed
+			TestSkipped -> do
+				when verbose $ do
+					hPutStrLn h (replicate 70 '=')
+					hPutStr h "SKIPPED: "
+					Data.Text.IO.hPutStrLn h name
+					hPutStr h "\n"
+				incRef countSkipped
+			TestFailed notes fs -> do
 				hPutStrLn h (replicate 70 '=')
-				hPutStr h "PASSED: "
+				hPutStr h "FAILED: "
 				Data.Text.IO.hPutStrLn h name
 				putNotes notes
-				hPutStr h "\n"
-			incRef countPassed
-		, reportSkipped = \name -> do
-			when verbose $ do
+				hPutStrLn h (replicate 70 '-')
+				forM_ fs $ \(Failure loc msg) -> do
+					case loc of
+						Just loc' -> do
+							Data.Text.IO.hPutStr h (locationFile loc')
+							hPutStr h ":"
+							hPutStrLn h (show (locationLine loc'))
+						Nothing -> return ()
+					Data.Text.IO.hPutStrLn h msg
+					hPutStr h "\n"
+				incRef countFailed
+			TestAborted notes msg -> do
 				hPutStrLn h (replicate 70 '=')
-				hPutStr h "SKIPPED: "
+				hPutStr h "ABORTED: "
 				Data.Text.IO.hPutStrLn h name
-				hPutStr h "\n"
-			incRef countSkipped
-		, reportFailed = \name notes fs -> do
-			hPutStrLn h (replicate 70 '=')
-			hPutStr h "FAILED: "
-			Data.Text.IO.hPutStrLn h name
-			putNotes notes
-			hPutStrLn h (replicate 70 '-')
-			forM_ fs $ \(Failure loc msg) -> do
-				case loc of
-					Just loc' -> do
-						Data.Text.IO.hPutStr h (locationFile loc')
-						hPutStr h ":"
-						hPutStrLn h (show (locationLine loc'))
-					Nothing -> return ()
+				putNotes notes
+				hPutStrLn h (replicate 70 '-')
 				Data.Text.IO.hPutStrLn h msg
 				hPutStr h "\n"
-			incRef countFailed
-		, reportAborted = \name notes msg -> do
-			hPutStrLn h (replicate 70 '=')
-			hPutStr h "ABORTED: "
-			Data.Text.IO.hPutStrLn h name
-			putNotes notes
-			hPutStrLn h (replicate 70 '-')
-			Data.Text.IO.hPutStrLn h msg
-			hPutStr h "\n"
-			incRef countAborted
-		, reportFinished = do
+				incRef countAborted
+		, reportFinish = do
 			n_passed <- readIORef countPassed
 			n_skipped <- readIORef countSkipped
 			n_failed <- readIORef countFailed
@@ -649,32 +640,16 @@ instance MonadIO ReportsM where
 
 reportTest :: TestOptions -> (Text, Test) -> ReportsM Bool
 reportTest options (name, t) = do
+	let notify io = ReportsM (mapM_ io)
+	
+	notify (\r -> reportStartTest r name)
 	result <- liftIO (runTest t options)
-	case result of
-		TestPassed notes -> do
-			passed name notes
-			return True
-		TestSkipped -> do
-			skipped name
-			return True
-		TestFailed notes fs -> do
-			failed name notes fs
-			return False
-		TestAborted notes msg -> do
-			aborted name notes msg
-			return False
-
-passed :: Text -> [(Text, Text)] -> ReportsM ()
-passed name notes = ReportsM (mapM_ (\r -> reportPassed r name notes))
-
-skipped :: Text -> ReportsM ()
-skipped name = ReportsM (mapM_ (\r -> reportSkipped r name))
-
-failed :: Text -> [(Text, Text)] -> [Failure] -> ReportsM ()
-failed name notes fs = ReportsM (mapM_ (\r -> reportFailed r name notes fs))
-
-aborted :: Text -> [(Text, Text)] -> Text -> ReportsM ()
-aborted name notes msg = ReportsM (mapM_ (\r -> reportAborted r name notes msg))
+	notify (\r -> reportFinishTest r name result)
+	return $ case result of
+		TestPassed{} -> True
+		TestSkipped{} -> True
+		TestFailed{} -> False
+		TestAborted{} -> False
 
 pure :: Bool -> String -> Assertion
 pure True _ = Assertion (return AssertionPassed)
