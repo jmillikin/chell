@@ -24,7 +24,7 @@ import           Test.HUnit.Lang (Assertion, performTestCase)
 --     ]
 -- @
 hunit :: Text -> Assertion -> Chell.Suite
-hunit name io = Chell.test name (Chell.Test chell_io) where
+hunit name io = Chell.test (Chell.Test name chell_io) where
 	chell_io _ = do
 		result <- performTestCase io
 		return $ case result of
