@@ -55,6 +55,7 @@ import           Control.Exception (Exception)
 import           Control.Monad (liftM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Data.Maybe (isJust, isNothing)
+import           Data.IORef (IORef, newIORef, readIORef, modifyIORef)
 import qualified Data.Text
 import           Data.Text (Text)
 import qualified Data.Text.IO
@@ -116,7 +117,7 @@ instance IsAssertion Bool where
 		else AssertionFailed "boolean assertion failed"))
 
 type Assertions = TestM ()
-type TestState = ([(Text, Text)], [Failure])
+type TestState = (IORef [(Text, Text)], [Failure])
 newtype TestM a = TestM { unTestM :: TestState -> IO (Maybe a, TestState) }
 
 instance Functor TestM where
@@ -146,11 +147,13 @@ instance MonadIO TestM where
 assertions :: Text -> Assertions -> Test
 assertions name testm = Test name io where
 	io _ = do
-		tried <- Control.Exception.try (unTestM testm ([], []))
+		noteRef <- newIORef []
+		tried <- Control.Exception.try (unTestM testm (noteRef, []))
+		notes <- readIORef noteRef
 		return $ case tried of
-			Left exc -> TestAborted [] (errorExc exc)
-			Right (_, (notes, [])) -> TestPassed (reverse notes)
-			Right (_, (notes, fs)) -> TestFailed (reverse notes) (reverse fs)
+			Left exc -> TestAborted notes (errorExc exc)
+			Right (_, (_, [])) -> TestPassed (reverse notes)
+			Right (_, (_, fs)) -> TestFailed (reverse notes) (reverse fs)
 	
 	errorExc :: Control.Exception.SomeException -> Text
 	errorExc exc = Data.Text.pack ("Test aborted due to exception: " ++ show exc)
@@ -188,7 +191,9 @@ trace msg = liftIO (Data.Text.IO.putStrLn msg)
 
 -- | Attach metadata to a test run. This will be included in reports.
 note :: Text -> Text -> Assertions
-note key value = TestM (\(notes, fs) -> return (Just (), ((key, value) : notes, fs)))
+note key value = TestM (\(notes, fs) -> do
+	modifyIORef notes ((key, value) :)
+	return (Just (), (notes, fs)))
 
 liftLoc :: TH.Loc -> TH.Q TH.Exp
 liftLoc loc = [| TH.Loc filename package module_ start end |] where
