@@ -146,17 +146,22 @@ instance MonadIO TestM where
 -- @
 assertions :: Text -> Assertions -> Test
 assertions name testm = Test name io where
-	io _ = do
+	io opts = do
 		noteRef <- newIORef []
-		tried <- Control.Exception.try (unTestM testm (noteRef, []))
-		notes <- readIORef noteRef
-		return $ case tried of
-			Left exc -> TestAborted notes (errorExc exc)
-			Right (_, (_, [])) -> TestPassed (reverse notes)
-			Right (_, (_, fs)) -> TestFailed (reverse notes) (reverse fs)
-	
-	errorExc :: Control.Exception.SomeException -> Text
-	errorExc exc = Data.Text.pack ("Test aborted due to exception: " ++ show exc)
+		
+		let getNotes = fmap reverse (readIORef noteRef)
+		
+		let getResult = do
+			res <- unTestM testm (noteRef, [])
+			case res of
+				(_, (_, [])) -> do
+					notes <- getNotes
+					return (TestPassed notes)
+				(_, (_, fs)) -> do
+					notes <- getNotes
+					return (TestFailed notes (reverse fs))
+		
+		handleJankyIO opts getResult getNotes
 
 addFailure :: Maybe TH.Loc -> Bool -> Text -> Assertions
 addFailure maybe_loc fatal msg = TestM $ \(notes, fs) -> do

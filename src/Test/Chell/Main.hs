@@ -30,6 +30,7 @@ data Option
 	| OptionJsonReport FilePath
 	| OptionTextReport FilePath
 	| OptionSeed Int
+	| OptionTimeout Int
 	deriving (Show, Eq)
 
 optionInfo :: [GetOpt.OptDescr Option]
@@ -60,6 +61,12 @@ optionInfo =
 	   	Nothing -> error ("Failed to parse --seed value " ++ show s)) "SEED")
 	  "the seed used for random numbers in (for example) quickcheck"
 	
+	, GetOpt.Option [] ["timeout"]
+	  (GetOpt.ReqArg (\s -> case parseTimeout s of
+	  	Just x -> OptionTimeout x
+	  	Nothing -> error ("Failed to parse --timeout value " ++ show s)) "TIMEOUT")
+	  "the maximum duration of a test, in milliseconds"
+	
 	]
 
 parseInt :: String -> Maybe Int
@@ -67,10 +74,22 @@ parseInt s = case [x | (x, "") <- reads s] of
 	[x] -> Just x
 	_ -> Nothing
 
+parseTimeout :: String -> Maybe Int
+parseTimeout s = do
+	msec <- parseInt s
+	if (toInteger msec) * 1000 > toInteger (maxBound :: Int)
+		then Nothing
+		else return msec
+
 getSeedOpt :: [Option] -> Maybe Int
 getSeedOpt [] = Nothing
 getSeedOpt ((OptionSeed s) : _) = Just s
 getSeedOpt (_:os) = getSeedOpt os
+
+getTimeoutOpt :: [Option] -> Maybe Int
+getTimeoutOpt [] = Nothing
+getTimeoutOpt ((OptionTimeout s) : _) = Just s
+getTimeoutOpt (_:os) = getTimeoutOpt os
 
 usage :: String -> String
 usage name = "Usage: " ++ name ++ " [OPTION...]"
@@ -103,6 +122,7 @@ defaultMain suites = do
 	
 	let testOptions = TestOptions
 		{ testOptionSeed = seed
+		, testOptionTimeout = getTimeoutOpt options
 		}
 	
 	let verbose = elem OptionVerbose options
@@ -136,7 +156,7 @@ matchesFilter strFilters = check where
 
 printResult :: Bool -> Test -> TestResult -> IO ()
 printResult verbose t result = case result of
-	TestPassed notes -> when verbose $ do
+	TestPassed _ -> when verbose $ do
 		Data.Text.IO.putStr (testName t)
 		putStrLn ": PASS"
 	TestSkipped -> when verbose $ do

@@ -2,20 +2,47 @@
 
 module Test.Chell.Types where
 
+import qualified Control.Exception
+import           Control.Exception (SomeException)
 import qualified Data.Text
 import           Data.Text (Text)
+import           System.Timeout (timeout)
 
 data Test = Test Text (TestOptions -> IO TestResult)
 
 data TestOptions = TestOptions
 	{ testOptionSeed :: Int
+	, testOptionTimeout :: Maybe Int
 	}
 
 testName :: Test -> Text
 testName (Test name _) = name
 
 runTest :: Test -> TestOptions -> IO TestResult
-runTest (Test _ io) = io
+runTest (Test _ io) options = handleJankyIO options (io options) (return [])
+
+handleJankyIO :: TestOptions -> IO TestResult -> IO [(Text, Text)] -> IO TestResult
+handleJankyIO opts getResult getNotes = do
+	let withTimeout = case testOptionTimeout opts of
+		Just time -> timeout (time * 1000)
+		Nothing -> fmap Just
+	
+	let hitTimeout = Data.Text.pack str where
+		str = "Test timed out after " ++ show time ++ " milliseconds"
+		Just time = testOptionTimeout opts
+	
+	let errorExc :: SomeException -> Text
+	    errorExc exc = Data.Text.pack ("Test aborted due to exception: " ++ show exc)
+	
+	tried <- withTimeout (Control.Exception.try getResult)
+	case tried of
+		Just (Right ret) -> return ret
+		Nothing -> do
+			notes <- getNotes
+			return (TestAborted notes hitTimeout)
+		Just (Left exc) -> do
+			notes <- getNotes
+			return (TestAborted notes (errorExc exc))
 
 data TestResult
 	= TestPassed [(Text, Text)]
