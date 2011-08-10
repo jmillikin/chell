@@ -51,7 +51,7 @@ optionInfo =
 	  (GetOpt.ReqArg OptionJsonReport "PATH")
 	  "write a parsable report to a file, in JSON"
 	
-	, GetOpt.Option [] ["test-report"]
+	, GetOpt.Option [] ["text-report"]
 	  (GetOpt.ReqArg OptionTextReport "PATH")
 	  "write a human-readable report"
 	
