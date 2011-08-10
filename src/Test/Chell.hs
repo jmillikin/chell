@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module Test.Chell
 	(
@@ -48,16 +49,26 @@ module Test.Chell
 	, greaterEqual
 	, lesser
 	, lesserEqual
+	, sameItems
+	, equalItems
+	, IsText
+	, equalLines
 	) where
 
 import qualified Control.Exception
 import           Control.Exception (Exception)
 import           Control.Monad (liftM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Data.Algorithm.Patience as Patience
+import qualified Data.ByteString.Char8
+import qualified Data.ByteString.Lazy.Char8
+import           Data.Foldable (Foldable, foldMap)
+import           Data.List (foldl', intercalate, sort)
 import           Data.Maybe (isJust, isNothing)
 import           Data.IORef (IORef, newIORef, readIORef, modifyIORef)
 import qualified Data.Text
 import           Data.Text (Text)
+import qualified Data.Text.Lazy
 import qualified Data.Text.IO
 
 import qualified Language.Haskell.TH as TH
@@ -114,7 +125,7 @@ instance IsAssertion Assertion where
 instance IsAssertion Bool where
 	toAssertion x = Assertion (return (if x
 		then AssertionPassed
-		else AssertionFailed "boolean assertion failed"))
+		else AssertionFailed "$assert: boolean assertion failed"))
 
 type Assertions = TestM ()
 type TestState = (IORef [(Text, Text)], [Failure])
@@ -314,3 +325,78 @@ lesser x y = pure (x < y) ("lesser: " ++ show x ++ " is not less than " ++ show 
 -- | Assert a value is less than or equal to another.
 lesserEqual :: (Ord a, Show a) => a -> a -> Assertion
 lesserEqual x y = pure (x <= y) ("lesserEqual: " ++ show x ++ " is not less than or equal to " ++ show y)
+
+-- | Assert that two containers have the same items, in any order.
+sameItems :: (Foldable container, Show item, Ord item) => container item -> container item -> Assertion
+sameItems x y = equalDiff' "sameItems" sort x y
+
+-- | Assert that two containers have the same items, in the same order.
+equalItems :: (Foldable container, Show item, Ord item) => container item -> container item -> Assertion
+equalItems x y = equalDiff' "equalItems" id x y
+
+equalDiff' :: (Foldable container, Show item, Ord item)
+           => String
+           -> ([item]
+           -> [item])
+           -> container item
+           -> container item
+           -> Assertion
+equalDiff' label norm x y = checkDiff (items x) (items y) where
+	items = norm . foldMap (:[])
+	checkDiff xs ys = case checkItems (Patience.diff xs ys) of
+		(same, diff) -> pure same diff
+	
+	checkItems diffItems = case foldl' checkItem (True, []) diffItems of
+		(same, diff) -> (same, errorMsg (intercalate "\n" (reverse diff)))
+	
+	checkItem (same, acc) item = case item of
+		Patience.Old t -> (False, ("\t- " ++ show t) : acc)
+		Patience.New t -> (False, ("\t+ " ++ show t) : acc)
+		Patience.Both t _-> (same, ("\t  " ++ show t) : acc)
+	
+	errorMsg diff = label ++ ": items differ\n" ++ diff
+
+-- | Class for types which can be treated as text.
+class IsText a where
+	toLines :: a -> [a]
+	unpack :: a -> String
+
+instance IsText String where
+	toLines = lines
+	unpack = id
+
+instance IsText Text where
+	toLines = Data.Text.lines
+	unpack = Data.Text.unpack
+
+instance IsText Data.Text.Lazy.Text where
+	toLines = Data.Text.Lazy.lines
+	unpack = Data.Text.Lazy.unpack
+
+-- | Uses @Data.ByteString.Char8@
+instance IsText Data.ByteString.Char8.ByteString where
+	toLines = Data.ByteString.Char8.lines
+	unpack = Data.ByteString.Char8.unpack
+
+-- | Uses @Data.ByteString.Lazy.Char8@
+instance IsText Data.ByteString.Lazy.Char8.ByteString where
+	toLines = Data.ByteString.Lazy.Char8.lines
+	unpack = Data.ByteString.Lazy.Char8.unpack
+
+-- | Assert that two pieces of text are equal. This uses a diff algorithm
+-- to check line-by-line, so the error message will be easier to read on
+-- large inputs.
+equalLines :: (Ord a, IsText a) => a -> a -> Assertion
+equalLines x y = checkDiff (toLines x) (toLines y) where
+	checkDiff xs ys = case checkItems (Patience.diff xs ys) of
+		(same, diff) -> pure same diff
+	
+	checkItems diffItems = case foldl' checkItem (True, []) diffItems of
+		(same, diff) -> (same, errorMsg (intercalate "\n" (reverse diff)))
+	
+	checkItem (same, acc) item = case item of
+		Patience.Old t -> (False, ("\t- " ++ unpack t) : acc)
+		Patience.New t -> (False, ("\t+ " ++ unpack t) : acc)
+		Patience.Both t _-> (same, ("\t  " ++ unpack t) : acc)
+	
+	errorMsg diff = "equalLines: lines differ\n" ++ diff
