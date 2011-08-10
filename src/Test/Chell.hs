@@ -8,25 +8,14 @@ module Test.Chell
 	-- * Main
 	  defaultMain
 	
-	-- ** Tests
-	, Test (..)
-	, testName
-	, runTest
-	
-	, TestOptions
-	, testOptionSeed
-	, testOptionTimeout
-	, TestResult (..)
-	, Failure (..)
-	, Location (..)
-	, skipIf
-	, skipWhen
-	
-	-- ** Suites
+	-- * Test suites
 	, Suite
 	, suite
-	, test
+	, suiteName
 	, suiteTests
+	, test
+	, skipIf
+	, skipWhen
 	
 	-- * Basic testing library
 	-- $doc-basic-testing
@@ -57,6 +46,18 @@ module Test.Chell
 	, equalItems
 	, IsText
 	, equalLines
+	
+	-- * Constructing tests
+	, Test (..)
+	, testName
+	, runTest
+	
+	, TestOptions
+	, testOptionSeed
+	, testOptionTimeout
+	, TestResult (..)
+	, Failure (..)
+	, Location (..)
 	) where
 
 import qualified Control.Applicative
@@ -96,12 +97,12 @@ testOptionSeed = testOptionSeed_
 testOptionTimeout :: TestOptions -> Maybe Int
 testOptionTimeout = testOptionTimeout_
 
--- | A test which is always skipped. Use this to avoid commenting out tests
+-- | Conditionally skip a test. Use this to avoid commenting out tests
 -- which are currently broken, or do not work on the current platform.
 --
 -- @
 --tests = 'suite' \"tests\"
---    [ 'test' ('skipIf' onWindows test_WindowsSpecific)
+--    [ 'test' ('skipIf' builtOnUnix test_WindowsSpecific)
 --    ]
 -- @
 --
@@ -110,7 +111,7 @@ skipIf skip t@(Test name _) = if skip
 	then Test name (\_ -> return TestSkipped)
 	else t
 
--- | Potentially skip a test, depending on the result of a runtime check.
+-- | Conditionally skip a test, depending on the result of a runtime check.
 --
 -- @
 --tests = 'suite' \"tests\"

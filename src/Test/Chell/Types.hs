@@ -68,8 +68,8 @@ data Location = Location
 	}
 	deriving (Show, Eq)
 
--- | Running a 'Test' requires it to be contained in a 'Suite'. This gives
--- the test a name, so users know which test failed.
+-- | A tree of 'Test's; use the 'test' and 'suite' helper functions to build
+-- up a 'Suite'.
 data Suite = Suite Text [Suite]
            | SuiteTest Test
 
