@@ -10,26 +10,33 @@ import           System.Timeout (timeout)
 
 data Test = Test Text (TestOptions -> IO TestResult)
 
-data TestOptions = TestOptions
-	{ testOptionSeed :: Int
-	, testOptionTimeout :: Maybe Int
-	}
+instance Show Test where
+	show (Test name _) = "<Test " ++ show name ++ ">"
 
+data TestOptions = TestOptions
+	{ testOptionSeed_ :: Int
+	, testOptionTimeout_ :: Maybe Int
+	}
+	deriving (Show, Eq)
+
+-- | @testName (Test name _) = name@
 testName :: Test -> Text
 testName (Test name _) = name
 
+-- | Run a test, wrapped in error handlers. This will return 'TestAborted' if
+-- the test throws an exception or times out.
 runTest :: Test -> TestOptions -> IO TestResult
 runTest (Test _ io) options = handleJankyIO options (io options) (return [])
 
 handleJankyIO :: TestOptions -> IO TestResult -> IO [(Text, Text)] -> IO TestResult
 handleJankyIO opts getResult getNotes = do
-	let withTimeout = case testOptionTimeout opts of
+	let withTimeout = case testOptionTimeout_ opts of
 		Just time -> timeout (time * 1000)
 		Nothing -> fmap Just
 	
 	let hitTimeout = Data.Text.pack str where
 		str = "Test timed out after " ++ show time ++ " milliseconds"
-		Just time = testOptionTimeout opts
+		Just time = testOptionTimeout_ opts
 	
 	let errorExc :: SomeException -> Text
 	    errorExc exc = Data.Text.pack ("Test aborted due to exception: " ++ show exc)
@@ -49,19 +56,25 @@ data TestResult
 	| TestSkipped
 	| TestFailed [(Text, Text)] [Failure]
 	| TestAborted [(Text, Text)] Text
+	deriving (Show, Eq)
 
 data Failure = Failure (Maybe Location) Text
+	deriving (Show, Eq)
 
 data Location = Location
 	{ locationFile :: Text
 	, locationModule :: Text
 	, locationLine :: Integer
 	}
+	deriving (Show, Eq)
 
 -- | Running a 'Test' requires it to be contained in a 'Suite'. This gives
 -- the test a name, so users know which test failed.
 data Suite = Suite Text [Suite]
            | SuiteTest Test
+
+instance Show Suite where
+	show s = "<Suite " ++ show (suiteName s) ++ ">"
 
 test :: Test -> Suite
 test = SuiteTest

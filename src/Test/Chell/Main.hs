@@ -121,8 +121,8 @@ defaultMain suites = do
 		Nothing -> randomIO
 	
 	let testOptions = TestOptions
-		{ testOptionSeed = seed
-		, testOptionTimeout = getTimeoutOpt options
+		{ testOptionSeed_ = seed
+		, testOptionTimeout_ = getTimeoutOpt options
 		}
 	
 	let verbose = elem OptionVerbose options

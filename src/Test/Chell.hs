@@ -10,7 +10,12 @@ module Test.Chell
 	
 	-- ** Tests
 	, Test (..)
-	, TestOptions (..)
+	, testName
+	, runTest
+	
+	, TestOptions
+	, testOptionSeed
+	, testOptionTimeout
 	, TestResult (..)
 	, Failure (..)
 	, Location (..)
@@ -55,9 +60,10 @@ module Test.Chell
 	, equalLines
 	) where
 
+import qualified Control.Applicative
 import qualified Control.Exception
 import           Control.Exception (Exception)
-import           Control.Monad (liftM)
+import           Control.Monad (ap, liftM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.Algorithm.Patience as Patience
 import qualified Data.ByteString.Char8
@@ -75,6 +81,21 @@ import qualified Language.Haskell.TH as TH
 
 import           Test.Chell.Main (defaultMain)
 import           Test.Chell.Types
+
+-- | Get the RNG seed for this test run. The seed is generated once, in
+-- 'defaultMain', and used for all tests. It is also logged to reports using
+-- a note.
+--
+-- Users may specify a seed using the @--seed@ command-line option.
+testOptionSeed :: TestOptions -> Int
+testOptionSeed = testOptionSeed_
+
+-- | An optional timeout, in millseconds. Tests which run longer than this
+-- timeout will be aborted.
+--
+-- Users may specify a timeout using the @--timeout@ command-line option.
+testOptionTimeout :: TestOptions -> Maybe Int
+testOptionTimeout = testOptionTimeout_
 
 -- | A test which is always skipped. Use this to avoid commenting out tests
 -- which are currently broken, or do not work on the current platform.
@@ -133,6 +154,10 @@ newtype TestM a = TestM { unTestM :: TestState -> IO (Maybe a, TestState) }
 
 instance Functor TestM where
 	fmap = liftM
+
+instance Control.Applicative.Applicative TestM where
+	pure = return
+	(<*>) = ap
 
 instance Monad TestM where
 	return x = TestM (\s -> return (Just x, s))
