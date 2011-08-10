@@ -34,7 +34,6 @@ module Test.Chell
 	, AssertionResult (..)
 	, IsAssertion
 	, Assertions
-	, TestM
 	, assertions
 	, assert
 	, expect
@@ -148,27 +147,26 @@ instance IsAssertion Bool where
 		then AssertionPassed
 		else AssertionFailed "$assert: boolean assertion failed"))
 
-type Assertions = TestM ()
 type TestState = (IORef [(Text, Text)], [Failure])
-newtype TestM a = TestM { unTestM :: TestState -> IO (Maybe a, TestState) }
+newtype Assertions a = Assertions { unAssertions :: TestState -> IO (Maybe a, TestState) }
 
-instance Functor TestM where
+instance Functor Assertions where
 	fmap = liftM
 
-instance Control.Applicative.Applicative TestM where
+instance Control.Applicative.Applicative Assertions where
 	pure = return
 	(<*>) = ap
 
-instance Monad TestM where
-	return x = TestM (\s -> return (Just x, s))
-	m >>= f = TestM (\s -> do
-		(maybe_a, s') <- unTestM m s
+instance Monad Assertions where
+	return x = Assertions (\s -> return (Just x, s))
+	m >>= f = Assertions (\s -> do
+		(maybe_a, s') <- unAssertions m s
 		case maybe_a of
 			Nothing -> return (Nothing, s')
-			Just a -> unTestM (f a) s')
+			Just a -> unAssertions (f a) s')
 
-instance MonadIO TestM where
-	liftIO io = TestM (\s -> do
+instance MonadIO Assertions where
+	liftIO io = Assertions (\s -> do
 		x <- io
 		return (Just x, s))
 
@@ -180,7 +178,7 @@ instance MonadIO TestM where
 --     $assert (1 == 1)
 --     $assert (equal 1 1)
 -- @
-assertions :: Text -> Assertions -> Test
+assertions :: Text -> Assertions a -> Test
 assertions name testm = Test name io where
 	io opts = do
 		noteRef <- newIORef []
@@ -188,7 +186,7 @@ assertions name testm = Test name io where
 		let getNotes = fmap reverse (readIORef noteRef)
 		
 		let getResult = do
-			res <- unTestM testm (noteRef, [])
+			res <- unAssertions testm (noteRef, [])
 			case res of
 				(_, (_, [])) -> do
 					notes <- getNotes
@@ -199,8 +197,8 @@ assertions name testm = Test name io where
 		
 		handleJankyIO opts getResult getNotes
 
-addFailure :: Maybe TH.Loc -> Bool -> Text -> Assertions
-addFailure maybe_loc fatal msg = TestM $ \(notes, fs) -> do
+addFailure :: Maybe TH.Loc -> Bool -> Text -> Assertions ()
+addFailure maybe_loc fatal msg = Assertions $ \(notes, fs) -> do
 	let loc = do
 		th_loc <- maybe_loc
 		return $ Location
@@ -217,9 +215,9 @@ addFailure maybe_loc fatal msg = TestM $ \(notes, fs) -> do
 -- from which it was used. Its effective type is:
 --
 -- @
--- $fail :: 'Text' -> 'Assertions'
+-- $fail :: 'Text' -> 'Assertions' ()
 -- @
-fail :: TH.Q TH.Exp -- :: Text -> Assertions
+fail :: TH.Q TH.Exp -- :: Text -> Assertions ()
 fail = do
 	loc <- TH.location
 	let qloc = liftLoc loc
@@ -227,12 +225,12 @@ fail = do
 
 -- | Print a message from within a test. This is just a helper for debugging,
 -- so you don't have to import @Debug.Trace@.
-trace :: Text -> Assertions
+trace :: Text -> Assertions ()
 trace msg = liftIO (Data.Text.IO.putStrLn msg)
 
 -- | Attach metadata to a test run. This will be included in reports.
-note :: Text -> Text -> Assertions
-note key value = TestM (\(notes, fs) -> do
+note :: Text -> Text -> Assertions ()
+note key value = Assertions (\(notes, fs) -> do
 	modifyIORef notes ((key, value) :)
 	return (Just (), (notes, fs)))
 
@@ -244,7 +242,7 @@ liftLoc loc = [| TH.Loc filename package module_ start end |] where
 	start = TH.loc_start loc
 	end = TH.loc_end loc
 
-assertAt :: IsAssertion assertion => TH.Loc -> Bool -> assertion -> Assertions
+assertAt :: IsAssertion assertion => TH.Loc -> Bool -> assertion -> Assertions ()
 assertAt loc fatal assertion = do
 	let Assertion io = toAssertion assertion
 	result <- liftIO io
@@ -259,9 +257,9 @@ assertAt loc fatal assertion = do
 -- from which it was used. Its effective type is:
 --
 -- @
--- $assert :: 'IsAssertion' assertion => assertion -> 'Assertions'
+-- $assert :: 'IsAssertion' assertion => assertion -> 'Assertions' ()
 -- @
-assert :: TH.Q TH.Exp -- :: IsAssertion assertion => assertion -> Assertions
+assert :: TH.Q TH.Exp -- :: IsAssertion assertion => assertion -> Assertions ()
 assert = do
 	loc <- TH.location
 	let qloc = liftLoc loc
@@ -274,9 +272,9 @@ assert = do
 -- from which it was used. Its effective type is:
 --
 -- @
--- $expect :: 'IsAssertion' assertion => assertion -> 'Assertions'
+-- $expect :: 'IsAssertion' assertion => assertion -> 'Assertions' ()
 -- @
-expect :: TH.Q TH.Exp -- :: IsAssertion assertion => assertion -> Assertions
+expect :: TH.Q TH.Exp -- :: IsAssertion assertion => assertion -> Assertions ()
 expect = do
 	loc <- TH.location
 	let qloc = liftLoc loc
