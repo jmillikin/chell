@@ -4,18 +4,19 @@ module Test.Chell.Main
 	( defaultMain
 	) where
 
-import           Control.Monad (foldM, forM_, unless, when)
-import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad (forM, forM_, unless, when)
+import           Control.Monad.Trans.Class (lift)
+import qualified Control.Monad.Trans.State as State
+import qualified Control.Monad.Trans.Writer as Writer
+import qualified Data.ByteString
 import           Data.Char (ord)
-import           Data.IORef (newIORef, readIORef, atomicModifyIORef)
-import           Data.List (intercalate)
 import qualified Data.Text
-import           Data.Text (Text)
+import           Data.Text (Text, pack)
+import qualified Data.Text.Encoding
 import qualified Data.Text.IO
 import qualified System.Console.GetOpt as GetOpt
 import           System.Environment (getArgs, getProgName)
 import           System.Exit (exitSuccess, exitFailure)
-import           System.IO (Handle, stderr, hPutStr, hPutStrLn)
 import qualified System.IO as IO
 import           System.Random (randomIO)
 import           Text.Printf (printf)
@@ -82,8 +83,8 @@ defaultMain suites = do
 	let (options, filters, optionErrors) = GetOpt.getOpt GetOpt.Permute optionInfo args
 	unless (null optionErrors) $ do
 		name <- getProgName
-		hPutStrLn stderr (concat optionErrors)
-		hPutStrLn stderr (GetOpt.usageInfo (usage name) optionInfo)
+		IO.hPutStrLn IO.stderr (concat optionErrors)
+		IO.hPutStrLn IO.stderr (GetOpt.usageInfo (usage name) optionInfo)
 		exitFailure
 	
 	when (OptionHelp `elem` options) $ do
@@ -104,15 +105,26 @@ defaultMain suites = do
 		{ testOptionSeed = seed
 		}
 	
-	allPassed <- withReports options $ do
-		ReportsM (mapM_ reportStart)
-		allPassed <- foldM (\good t -> do
-			thisGood <- reportTest testOptions t
-			return (good && thisGood)) True tests
-		ReportsM (mapM_ reportFinish)
-		return allPassed
+	let verbose = elem OptionVerbose options
+	results <- forM tests $ \t -> do
+		result <- runTest t testOptions
+		printResult verbose t result
+		return (t, result)
 	
-	if allPassed
+	let reports = getReports options
+	forM_ reports $ \(path, fmt, toText) ->
+		IO.withBinaryFile path IO.WriteMode $ \h -> do
+			let text = toText results
+			let bytes = Data.Text.Encoding.encodeUtf8 text
+			when verbose $ do
+				putStrLn ("Writing " ++ fmt ++ " report to " ++ show path)
+			Data.ByteString.hPut h bytes
+	
+	let stats = resultStatistics results
+	let (_, _, failed, aborted) = stats
+	Data.Text.IO.putStrLn (formatResultStatistics stats)
+	
+	if failed == 0 && aborted == 0
 		then exitSuccess
 		else exitFailure
 
@@ -122,260 +134,282 @@ matchesFilter strFilters = check where
 	check t = any (matchName (testName t)) filters
 	matchName name f = f == name || Data.Text.isPrefixOf (Data.Text.append f ".") name
 
-data Report = Report
-	{ reportStart :: IO ()
-	, reportStartTest :: Text -> IO ()
-	, reportFinishTest :: Text -> TestResult -> IO ()
-	, reportFinish :: IO ()
-	}
+printResult :: Bool -> Test -> TestResult -> IO ()
+printResult verbose t result = case result of
+	TestPassed notes -> when verbose $ do
+		Data.Text.IO.putStr (testName t)
+		putStrLn ": PASS"
+	TestSkipped -> when verbose $ do
+		Data.Text.IO.putStr (testName t)
+		putStrLn ": SKIPPED"
+	TestFailed notes fs -> do
+		putStrLn (replicate 70 '=')
+		Data.Text.IO.putStr (testName t)
+		putStrLn ": FAILED"
+		forM_ notes $ \(key, value) -> do
+			putStr "\t"
+			Data.Text.IO.putStr key
+			putStr "="
+			Data.Text.IO.putStrLn value
+		putStrLn (replicate 70 '=')
+		forM_ fs $ \(Failure loc msg) -> do
+			case loc of
+				Just loc' -> do
+					Data.Text.IO.putStr (locationFile loc')
+					putStr ":"
+					putStrLn (show (locationLine loc'))
+				Nothing -> return ()
+			Data.Text.IO.putStr msg
+			putStr "\n\n"
+	TestAborted notes msg -> do
+		putStrLn (replicate 70 '=')
+		Data.Text.IO.putStr (testName t)
+		putStrLn ": ABORTED"
+		forM_ notes $ \(key, value) -> do
+			putStr "\t"
+			Data.Text.IO.putStr key
+			putStr "="
+			Data.Text.IO.putStrLn value
+		putStrLn (replicate 70 '=')
+		Data.Text.IO.putStr msg
+		putStr "\n\n"
 
-jsonReport :: Handle -> IO Report
-jsonReport h = do
-	commaRef <- newIORef False
-	let comma = do
-		needComma <- atomicModifyIORef commaRef (\c -> (True, c))
-		if needComma
-			then hPutStr h ", "
-			else hPutStr h "  "
-	let putNotes notes = do
-		hPutStr h ", \"notes\": [\n"
-		hPutStr h (intercalate "\n, " (do
-			(key, value) <- notes
-			return (concat
-				[ "{\"key\": \""
-				, escapeJSON key
-				, "\", \"value\": \""
-				, escapeJSON value
-				, "\"}\n"
-				])))
-		hPutStrLn h "]"
-	return (Report
-		{ reportStart = do
-			hPutStrLn h "{\"test-runs\": [ "
-		, reportStartTest = \name -> do
-			comma
-			hPutStr h "{\"test\": \""
-			hPutStr h (escapeJSON name)
-			hPutStr h "\", \"result\": \""
-		, reportFinishTest = \_ result -> case result of
-			TestPassed notes -> do
-				hPutStr h "passed\""
-				putNotes notes
-				hPutStrLn h "}"
-			TestSkipped -> do
-				hPutStrLn h "skipped\"}"
-			TestFailed notes fs -> do
-				hPutStrLn h "failed\", \"failures\": ["
-				hPutStrLn h (intercalate "\n, " (do
-					Failure loc msg <- fs
-					let locString = case loc of
-						Just loc' -> concat
-							[ ", \"location\": {\"module\": \""
-							, escapeJSON (locationModule loc')
-							, "\", \"file\": \""
-							, escapeJSON (locationFile loc')
-							, "\", \"line\": "
-							, show (locationLine loc')
-							, "}"
-							]
-						Nothing -> ""
-					return ("{\"message\": \"" ++ escapeJSON msg ++ "\"" ++ locString ++ "}")))
-				hPutStr h "]"
-				putNotes notes
-				hPutStrLn h "}"
-			TestAborted notes msg -> do
-				hPutStr h "aborted\", \"abortion\": {\"message\": \""
-				hPutStr h (escapeJSON msg)
-				hPutStr h "\"}"
-				putNotes notes
-				hPutStrLn h "}"
-		, reportFinish = do
-			hPutStrLn h "]}"
-		})
+type Report = [(Test, TestResult)] -> Text
 
-escapeJSON :: Text -> String
-escapeJSON = concatMap (\c -> case c of
-	'"' -> "\\\""
-	'\\' -> "\\\\"
-	_ | ord c <= 0x1F -> printf "\\u%04X" (ord c)
-	_ -> [c]) . Data.Text.unpack
+getReports :: [Option] -> [(FilePath, String, Report)]
+getReports = concatMap step where
+	step (OptionXmlReport path) = [(path, "XML", xmlReport)]
+	step (OptionJsonReport path) = [(path, "JSON", jsonReport)]
+	step (OptionLog path) = [(path, "text", textReport)]
+	step _  = []
 
-xmlReport :: Handle -> Report
-xmlReport h = Report
-	{ reportStart = do
-		hPutStrLn h "<?xml version=\"1.0\" encoding=\"utf8\"?>"
-		hPutStrLn h "<report xmlns='urn:john-millikin:chell:report:1'>"
-	, reportStartTest = \name -> do
-		hPutStr h "\t<test-run test='"
-		hPutStr h (escapeXML name)
-		hPutStr h "' result='"
-	, reportFinishTest = \_ result -> case result of
+jsonReport :: [(Test, TestResult)] -> Text
+jsonReport results = Writer.execWriter writer where
+	tell = Writer.tell
+	
+	writer = do
+		tell "{\"test-runs\": ["
+		commas results tellResult
+		tell "]}"
+	
+	tellResult (t, result) = case result of
 		TestPassed notes -> do
-			hPutStrLn h "passed'>"
-			putNotes notes
-			hPutStrLn h "\t</test-run>"
+			tell "{\"test\": \""
+			tell (escapeJSON (testName t))
+			tell "\", \"result\": \"passed\""
+			tellNotes notes
+			tell "}"
 		TestSkipped -> do
-			hPutStrLn h "skipped'/>"
+			tell "{\"test\": \""
+			tell (escapeJSON (testName t))
+			tell "\", \"result\": \"skipped\"}"
 		TestFailed notes fs -> do
-			hPutStrLn h "failed'>"
-			forM_ fs $ \(Failure loc msg) -> do
-				hPutStr h "\t\t<failure message='"
-				hPutStr h (escapeXML msg)
+			tell "{\"test\": \""
+			tell (escapeJSON (testName t))
+			tell "\", \"result\": \"failed\", \"failures\": ["
+			commas fs $ \(Failure loc msg) -> do
+				tell "{\"message\": \""
+				tell (escapeJSON msg)
+				tell "\""
 				case loc of
 					Just loc' -> do
-						hPutStrLn h "'>"
-						hPutStr h "\t\t\t<location module='"
-						hPutStr h (escapeXML (locationModule loc'))
-						hPutStr h "' file='"
-						hPutStr h (escapeXML (locationFile loc'))
-						hPutStr h "' line='"
-						hPutStr h (show (locationLine loc'))
-						hPutStrLn h "'/>"
-						hPutStrLn h "\t\t</failure>"
-					Nothing -> hPutStrLn h "'/>"
-			putNotes notes
-			hPutStrLn h "\t</test-run>"
+						tell ", \"location\": {\"module\": \""
+						tell (escapeJSON (locationModule loc'))
+						tell "\", \"file\": \""
+						tell (escapeJSON (locationFile loc'))
+						tell "\", \"line\": "
+						tell (pack (show (locationLine loc')))
+						tell "}"
+					Nothing -> return ()
+				tell "}"
+			tell "]"
+			tellNotes notes
+			tell "}"
 		TestAborted notes msg -> do
-			hPutStrLn h "aborted'>"
-			hPutStr h "\t\t<abortion message='"
-			hPutStr h (escapeXML msg)
-			hPutStrLn h "'/>"
-			putNotes notes
-			hPutStrLn h "\t</test-run>"
-	, reportFinish = do
-		hPutStrLn h "</report>"
-	} where
-		putNotes notes = forM_ notes $ \(key, value) -> do
-			hPutStr h "\t\t<note key=\""
-			hPutStr h (escapeXML key)
-			hPutStr h "\" value=\""
-			hPutStr h (escapeXML value)
-			hPutStrLn h "\"/>"
-
-escapeXML :: Text -> String
-escapeXML = concatMap (\c -> case c of
-	'&' -> "&amp;"
-	'<' -> "&lt;"
-	'>' -> "&gt;"
-	'"' -> "&quot;"
-	'\'' -> "&apos;"
-	_ -> [c]) . Data.Text.unpack
-
-textReport :: Bool -> Handle -> IO Report
-textReport verbose h = do
-	countPassed <- newIORef (0 :: Integer)
-	countSkipped <- newIORef (0 :: Integer)
-	countFailed <- newIORef (0 :: Integer)
-	countAborted <- newIORef (0 :: Integer)
+			tell "{\"test\": \""
+			tell (escapeJSON (testName t))
+			tell "\", \"result\": \"aborted\", \"abortion\": {\"message\": \""
+			tell (escapeJSON msg)
+			tell "\"}"
+			tellNotes notes
+			tell "}"
 	
-	let incRef ref = atomicModifyIORef ref (\a -> (a + 1, ()))
+	escapeJSON = Data.Text.concatMap (\c -> case c of
+		'"' -> "\\\""
+		'\\' -> "\\\\"
+		_ | ord c <= 0x1F -> pack (printf "\\u%04X" (ord c))
+		_ -> Data.Text.singleton c)
 	
-	let putNotes notes = forM_ notes $ \(key, value) -> do
-		Data.Text.IO.hPutStr h key
-		hPutStr h "="
-		Data.Text.IO.hPutStrLn h value
+	tellNotes notes = do
+		tell ", \"notes\": ["
+		commas notes $ \(key, value) -> do
+			tell "{\"key\": \""
+			tell (escapeJSON key)
+			tell "\", \"value\": \""
+			tell (escapeJSON value)
+			tell "\"}"
+		tell "]"
 	
-	return (Report
-		{ reportStart = return ()
-		, reportStartTest = \_ -> return ()
-		, reportFinishTest = \name result -> case result of
-			TestPassed notes -> do
-				when verbose $ do
-					hPutStrLn h (replicate 70 '=')
-					hPutStr h "PASSED: "
-					Data.Text.IO.hPutStrLn h name
-					putNotes notes
-					hPutStr h "\n"
-				incRef countPassed
-			TestSkipped -> do
-				when verbose $ do
-					hPutStrLn h (replicate 70 '=')
-					hPutStr h "SKIPPED: "
-					Data.Text.IO.hPutStrLn h name
-					hPutStr h "\n"
-				incRef countSkipped
-			TestFailed notes fs -> do
-				hPutStrLn h (replicate 70 '=')
-				hPutStr h "FAILED: "
-				Data.Text.IO.hPutStrLn h name
-				putNotes notes
-				hPutStrLn h (replicate 70 '-')
-				forM_ fs $ \(Failure loc msg) -> do
-					case loc of
-						Just loc' -> do
-							Data.Text.IO.hPutStr h (locationFile loc')
-							hPutStr h ":"
-							hPutStrLn h (show (locationLine loc'))
-						Nothing -> return ()
-					Data.Text.IO.hPutStrLn h msg
-					hPutStr h "\n"
-				incRef countFailed
-			TestAborted notes msg -> do
-				hPutStrLn h (replicate 70 '=')
-				hPutStr h "ABORTED: "
-				Data.Text.IO.hPutStrLn h name
-				putNotes notes
-				hPutStrLn h (replicate 70 '-')
-				Data.Text.IO.hPutStrLn h msg
-				hPutStr h "\n"
-				incRef countAborted
-		, reportFinish = do
-			n_passed <- readIORef countPassed
-			n_skipped <- readIORef countSkipped
-			n_failed <- readIORef countFailed
-			n_aborted <- readIORef countAborted
-			if n_failed == 0 && n_aborted == 0
-				then hPutStr h "PASS: "
-				else hPutStr h "FAIL: "
-			let putNum comma n what = hPutStr h $ if n == 1
-				then comma ++ "1 test " ++ what
-				else comma ++ show n ++ " tests " ++ what
-			
-			let total = sum [n_passed, n_skipped, n_failed, n_aborted]
-			putNum "" total "run"
-			when (n_passed > 0) (putNum ", " n_passed "passed")
-			when (n_skipped > 0) (putNum ", " n_skipped "skipped")
-			when (n_failed > 0) (putNum ", " n_failed "failed")
-			when (n_aborted > 0) (putNum ", " n_aborted "aborted")
-			hPutStr h "\n"
-		})
+	commas xs block = State.evalStateT (commaState xs block) False
+	commaState xs block = forM_ xs $ \x -> do
+		let tell' = lift . Writer.tell
+		needComma <- State.get
+		if needComma
+			then tell' "\n, "
+			else tell' "\n  "
+		State.put True
+		lift (block x)
 
-withReports :: [Option] -> ReportsM a -> IO a
-withReports opts reportsm = do
-	let loop [] reports = runReportsM reportsm (reverse reports)
-	    loop (o:os) reports = case o of
-	    	OptionXmlReport path -> IO.withBinaryFile path IO.WriteMode
-	    		(\h -> loop os (xmlReport h : reports))
-	    	OptionJsonReport path -> IO.withBinaryFile path IO.WriteMode
-	    		(\h -> jsonReport h >>= \r -> loop os (r : reports))
-	    	OptionLog path -> IO.withBinaryFile path IO.WriteMode
-	    		(\h -> textReport True h >>= \r -> loop os (r : reports))
-	    	_ -> loop os reports
+xmlReport :: [(Test, TestResult)] -> Text
+xmlReport results = Writer.execWriter writer where
+	tell = Writer.tell
 	
-	console <- textReport (OptionVerbose `elem` opts) stderr
-	loop opts [console]
-
-newtype ReportsM a = ReportsM { runReportsM :: [Report] -> IO a }
-
-instance Monad ReportsM where
-	return x = ReportsM (\_ -> return x)
-	m >>= f = ReportsM (\reports -> do
-		x <- runReportsM m reports
-		runReportsM (f x) reports)
-
-instance MonadIO ReportsM where
-	liftIO io = ReportsM (\_ -> io)
-
-reportTest :: TestOptions -> Test -> ReportsM Bool
-reportTest options t = do
-	let name = testName t
-	let notify io = ReportsM (mapM_ io)
+	writer = do
+		tell "<?xml version=\"1.0\" encoding=\"utf8\"?>\n"
+		tell "<report xmlns='urn:john-millikin:chell:report:1'>\n"
+		mapM_ tellResult results
+		tell "</report>"
 	
-	notify (\r -> reportStartTest r name)
-	result <- liftIO (runTest t options)
-	notify (\r -> reportFinishTest r name result)
-	return $ case result of
-		TestPassed{} -> True
-		TestSkipped{} -> True
-		TestFailed{} -> False
-		TestAborted{} -> False
+	tellResult (t, result) = case result of
+		TestPassed notes -> do
+			tell "\t<test-run test='"
+			tell (escapeXML (testName t))
+			tell "' result='passed'>\n"
+			tellNotes notes
+			tell "\t</test-run>\n"
+		TestSkipped -> do
+			tell "\t<test-run test='"
+			tell (escapeXML (testName t))
+			tell "' result='skipped'/>\n"
+		TestFailed notes fs -> do
+			tell "\t<test-run test='"
+			tell (escapeXML (testName t))
+			tell "' result='failed'>\n"
+			forM_ fs $ \(Failure loc msg) -> do
+				tell "\t\t<failure message='"
+				tell (escapeXML msg)
+				case loc of
+					Just loc' -> do
+						tell "'>\n"
+						tell "\t\t\t<location module='"
+						tell (escapeXML (locationModule loc'))
+						tell "' file='"
+						tell (escapeXML (locationFile loc'))
+						tell "' line='"
+						tell (pack (show (locationLine loc')))
+						tell "'/>\n"
+						tell "\t\t</failure>\n"
+					Nothing -> tell "'/>\n"
+			tellNotes notes
+			tell "\t</test-run>\n"
+		TestAborted notes msg -> do
+			tell "\t<test-run test='"
+			tell (escapeXML (testName t))
+			tell "' result='aborted'>\n"
+			tell "\t\t<abortion message='"
+			tell (escapeXML msg)
+			tell "'/>\n"
+			tellNotes notes
+			tell "\t</test-run>\n"
+	
+	escapeXML = Data.Text.concatMap (\c -> case c of
+		'&' -> "&amp;"
+		'<' -> "&lt;"
+		'>' -> "&gt;"
+		'"' -> "&quot;"
+		'\'' -> "&apos;"
+		_ -> Data.Text.singleton c)
+	
+	tellNotes notes = forM_ notes $ \(key, value) -> do
+		tell "\t\t<note key=\""
+		tell (escapeXML key)
+		tell "\" value=\""
+		tell (escapeXML value)
+		tell "\"/>\n"
+
+textReport :: [(Test, TestResult)] -> Text
+textReport results = Writer.execWriter writer where
+	tell = Writer.tell
+	
+	writer = do
+		forM_ results tellResult
+		let stats = resultStatistics results
+		tell (formatResultStatistics stats)
+	
+	tellResult (t, result) = case result of
+		TestPassed notes -> do
+			tell (Data.Text.replicate 70 "=")
+			tell "\n"
+			tell "PASSED: "
+			tell (testName t)
+			tell "\n"
+			tellNotes notes
+			tell "\n\n"
+		TestSkipped -> do
+			tell (Data.Text.replicate 70 "=")
+			tell "\n"
+			tell "SKIPPED: "
+			tell (testName t)
+			tell "\n\n"
+		TestFailed notes fs -> do
+			tell (Data.Text.replicate 70 "=")
+			tell "\n"
+			tell "FAILED: "
+			tell (testName t)
+			tell "\n"
+			tellNotes notes
+			tell (Data.Text.replicate 70 "-")
+			tell "\n"
+			forM_ fs $ \(Failure loc msg) -> do
+				case loc of
+					Just loc' -> do
+						tell (locationFile loc')
+						tell ":"
+						tell (pack (show (locationLine loc')))
+						tell "\n"
+					Nothing -> return ()
+				tell msg
+				tell "\n\n"
+		TestAborted notes msg -> do
+			tell (Data.Text.replicate 70 "=")
+			tell "\n"
+			tell "ABORTED: "
+			tell (testName t)
+			tell "\n"
+			tellNotes notes
+			tell (Data.Text.replicate 70 "-")
+			tell "\n"
+			tell msg
+			tell "\n\n"
+	
+	tellNotes notes = forM_ notes $ \(key, value) -> do
+		tell key
+		tell "="
+		tell value
+		tell "\n"
+
+formatResultStatistics :: (Integer, Integer, Integer, Integer) -> Text
+formatResultStatistics stats = Writer.execWriter writer where
+	writer = do
+		let (passed, skipped, failed, aborted) = stats
+		if failed == 0 && aborted == 0
+			then Writer.tell "PASS: "
+			else Writer.tell "FAIL: "
+		let putNum comma n what = Writer.tell $ if n == 1
+			then pack (comma ++ "1 test " ++ what)
+			else pack (comma ++ show n ++ " tests " ++ what)
+		
+		let total = sum [passed, skipped, failed, aborted]
+		putNum "" total "run"
+		when (passed > 0) (putNum ", " passed "passed")
+		when (skipped > 0) (putNum ", " skipped "skipped")
+		when (failed > 0) (putNum ", " failed "failed")
+		when (aborted > 0) (putNum ", " aborted "aborted")
+
+resultStatistics :: [(Test, TestResult)] -> (Integer, Integer, Integer, Integer)
+resultStatistics results = State.execState state (0, 0, 0, 0) where
+	state = forM_ results $ \(_, result) -> case result of
+		TestPassed{} ->  State.modify (\(p, s, f, a) -> (p+1, s, f, a))
+		TestSkipped{} -> State.modify (\(p, s, f, a) -> (p, s+1, f, a))
+		TestFailed{} ->  State.modify (\(p, s, f, a) -> (p, s, f+1, a))
+		TestAborted{} -> State.modify (\(p, s, f, a) -> (p, s, f, a+1))
