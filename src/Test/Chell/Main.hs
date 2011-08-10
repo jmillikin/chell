@@ -421,7 +421,7 @@ formatResultStatistics stats = Writer.execWriter writer where
 		
 		let total = sum [passed, skipped, failed, aborted]
 		putNum "" total "run"
-		when (passed > 0) (putNum ", " passed "passed")
+		(putNum ", " passed "passed")
 		when (skipped > 0) (putNum ", " skipped "skipped")
 		when (failed > 0) (putNum ", " failed "failed")
 		when (aborted > 0) (putNum ", " aborted "aborted")
