@@ -28,7 +28,7 @@ data Option
 	| OptionVerbose
 	| OptionXmlReport FilePath
 	| OptionJsonReport FilePath
-	| OptionLog FilePath
+	| OptionTextReport FilePath
 	| OptionSeed Int
 	deriving (Show, Eq)
 
@@ -50,9 +50,9 @@ optionInfo =
 	  (GetOpt.ReqArg OptionJsonReport "PATH")
 	  "write a parsable report to a file, in JSON"
 	
-	, GetOpt.Option [] ["log"]
-	  (GetOpt.ReqArg OptionLog "PATH")
-	  "write a full log (always max verbosity) to a file path"
+	, GetOpt.Option [] ["test-report"]
+	  (GetOpt.ReqArg OptionTextReport "PATH")
+	  "write a human-readable report"
 	
 	, GetOpt.Option [] ["seed"]
 	  (GetOpt.ReqArg (\s -> case parseInt s of
@@ -180,7 +180,7 @@ getReports :: [Option] -> [(FilePath, String, Report)]
 getReports = concatMap step where
 	step (OptionXmlReport path) = [(path, "XML", xmlReport)]
 	step (OptionJsonReport path) = [(path, "JSON", jsonReport)]
-	step (OptionLog path) = [(path, "text", textReport)]
+	step (OptionTextReport path) = [(path, "text", textReport)]
 	step _  = []
 
 jsonReport :: [(Test, TestResult)] -> Text
