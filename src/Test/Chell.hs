@@ -63,7 +63,7 @@ module Test.Chell
 import qualified Control.Applicative
 import qualified Control.Exception
 import           Control.Exception (Exception)
-import           Control.Monad (ap, liftM)
+import           Control.Monad (ap, liftM, when)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.Algorithm.Patience as Patience
 import qualified Data.ByteString.Char8
@@ -198,8 +198,8 @@ assertions name testm = Test name io where
 		
 		handleJankyIO opts getResult getNotes
 
-addFailure :: Maybe TH.Loc -> Bool -> Text -> Assertions ()
-addFailure maybe_loc fatal msg = Assertions $ \(notes, fs) -> do
+addFailure :: Maybe TH.Loc -> Text -> Assertions ()
+addFailure maybe_loc msg = Assertions $ \(notes, fs) -> do
 	let loc = do
 		th_loc <- maybe_loc
 		return $ Location
@@ -207,8 +207,10 @@ addFailure maybe_loc fatal msg = Assertions $ \(notes, fs) -> do
 			, locationModule = Data.Text.pack (TH.loc_module th_loc)
 			, locationLine = toInteger (fst (TH.loc_start th_loc))
 			}
-	return ( if fatal then Nothing else Just ()
-	       , (notes, Failure loc msg : fs))
+	return (Just (), (notes, Failure loc msg : fs))
+
+die :: Assertions a
+die = Assertions (\s -> return (Nothing, s))
 
 -- | Cause a test to immediately fail, with a message.
 --
@@ -216,13 +218,13 @@ addFailure maybe_loc fatal msg = Assertions $ \(notes, fs) -> do
 -- from which it was used. Its effective type is:
 --
 -- @
--- $fail :: 'Text' -> 'Assertions' ()
+-- $fail :: 'Text' -> 'Assertions' a
 -- @
-fail :: TH.Q TH.Exp -- :: Text -> Assertions ()
+fail :: TH.Q TH.Exp -- :: Text -> Assertions a
 fail = do
 	loc <- TH.location
 	let qloc = liftLoc loc
-	[| addFailure (Just $qloc) True |]
+	[| \msg -> addFailure (Just $qloc) msg >> die |]
 
 -- | Print a message from within a test. This is just a helper for debugging,
 -- so you don't have to import @Debug.Trace@.
@@ -249,7 +251,9 @@ assertAt loc fatal assertion = do
 	result <- liftIO io
 	case result of
 		AssertionPassed -> return ()
-		AssertionFailed err -> addFailure (Just loc) fatal err
+		AssertionFailed err -> do
+			addFailure (Just loc) err
+			when fatal die
 
 -- | Run an 'Assertion'. If the assertion fails, the test will immediately
 -- fail.
