@@ -36,6 +36,8 @@ module Test.Chell
 	, equalWithin
 	, just
 	, nothing
+	, left
+	, right
 	, throws
 	, throwsEq
 	, greater
@@ -312,6 +314,18 @@ just x = pure (isJust x) ("just: received Nothing")
 -- | Assert that some value is @Nothing@.
 nothing :: Maybe a -> Assertion
 nothing x = pure (isNothing x) ("nothing: received Just")
+
+-- | Assert that some value is @Left@.
+left :: Either a b -> Assertion
+left x = pure (isLeft x) ("left: received Right") where
+	isLeft (Left _) = True
+	isLeft (Right _) = False
+
+-- | Assert that some value is @Right@.
+right :: Either a b -> Assertion
+right x = pure (isRight x) ("right: received Left") where
+	isRight (Left _) = False
+	isRight (Right _) = True
 
 -- | Assert that some computation throws an exception matching the provided
 -- predicate. This is mostly useful for exception types which do not have an
