@@ -217,8 +217,8 @@ die = Assertions (\s -> return (Nothing, s))
 
 -- | Cause a test to immediately fail, with a message.
 --
--- 'fail' is a Template Haskell macro, to retain the source-file location
--- from which it was used. Its effective type is:
+-- 'Test.Chell.fail' is a Template Haskell macro, to retain the source-file
+-- location from which it was used. Its effective type is:
 --
 -- @
 -- $fail :: 'Text' -> 'Assertions' a
