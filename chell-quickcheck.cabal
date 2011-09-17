@@ -1,5 +1,5 @@
 name: chell-quickcheck
-version: 0.1
+version: 0.1.0.1
 synopsis: Quiet test runner (QuickCheck support)
 license: MIT
 license-file: license.txt
@@ -21,7 +21,7 @@ library
 
   build-depends:
       base >= 4 && < 5
-    , chell >= 0.1 && < 0.2
+    , chell >= 0.1 && < 0.3
     , QuickCheck >= 2.3 && < 2.5
     , random
     , text
