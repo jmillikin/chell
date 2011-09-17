@@ -100,33 +100,35 @@ testOptionSeed = testOptionSeed_
 testOptionTimeout :: TestOptions -> Maybe Int
 testOptionTimeout = testOptionTimeout_
 
--- | Conditionally skip a test. Use this to avoid commenting out tests
+-- | Conditionally skip tests. Use this to avoid commenting out tests
 -- which are currently broken, or do not work on the current platform.
 --
 -- @
 --tests = 'suite' \"tests\"
---    [ 'test' ('skipIf' builtOnUnix test_WindowsSpecific)
+--    [ 'skipIf' builtOnUnix test_WindowsSpecific
 --    ]
 -- @
 --
-skipIf :: Bool -> Test -> Test
-skipIf skip t@(Test name _) = if skip
-	then Test name (\_ -> return TestSkipped)
-	else t
+skipIf :: Bool -> Suite -> Suite
+skipIf skip = if skip then step else id where
+	step (SuiteTest (Test name _)) = SuiteTest
+		(Test name (\_ -> return TestSkipped))
+	step (Suite name suites) = Suite name (map step suites)
 
--- | Conditionally skip a test, depending on the result of a runtime check.
+-- | Conditionally skip tests, depending on the result of a runtime check. The
+-- predicate is checked before each test is started.
 --
 -- @
 --tests = 'suite' \"tests\"
---    [ 'test' ('skipWhen' noNetwork test_PingGoogle)
+--    [ 'skipWhen' noNetwork test_PingGoogle
 --    ]
 -- @
-skipWhen :: IO Bool -> Test -> Test
-skipWhen p (Test name io) = Test name $ \options -> do
-	skipThis <- p
-	if skipThis
-		then return TestSkipped
-		else io options
+skipWhen :: IO Bool -> Suite -> Suite
+skipWhen p = step where
+	step (SuiteTest (Test name io)) = SuiteTest (Test name (\opts -> do
+		skip <- p
+		if skip then return TestSkipped else io opts))
+	step (Suite name suites) = Suite name (map step suites)
 
 -- $doc-basic-testing
 --
@@ -177,13 +179,13 @@ instance MonadIO Assertions where
 -- | Convert a sequence of pass/fail assertions into a runnable test.
 --
 -- @
--- test_Equality :: Test
+-- test_Equality :: Suite
 -- test_Equality = assertions \"equality\" $ do
 --     $assert (1 == 1)
 --     $assert (equal 1 1)
 -- @
-assertions :: Text -> Assertions a -> Test
-assertions name testm = Test name io where
+assertions :: Text -> Assertions a -> Suite
+assertions name testm = test (Test name io) where
 	io opts = do
 		noteRef <- newIORef []
 		
