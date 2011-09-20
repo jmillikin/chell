@@ -14,11 +14,11 @@ synopsis: QuickCheck support for Chell, a quiet test runner
 
 source-repository head
   type: bazaar
-  location: https://john-millikin.com/software/chell/
+  location: https://john-millikin.com/software/chell-quickcheck/
 
 source-repository this
   type: bazaar
-  location: https://john-millikin.com/software/chell/
+  location: https://john-millikin.com/branches/chell-quickcheck/0.1/
   tag: chell-quickcheck_0.1.0.1
 
 library
