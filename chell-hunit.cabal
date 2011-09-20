@@ -14,11 +14,11 @@ synopsis: HUnit support for Chell, a quiet test runner
 
 source-repository head
   type: bazaar
-  location: https://john-millikin.com/software/chell/
+  location: https://john-millikin.com/software/chell-hunit/
 
 source-repository this
   type: bazaar
-  location: https://john-millikin.com/software/chell/
+  location: https://john-millikin.com/branches/chell-hunit/0.1/
   tag: chell-hunit_0.1.0.1
 
 library
