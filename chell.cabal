@@ -1,5 +1,5 @@
 name: chell
-version: 0.2
+version: 0.2.1
 license: MIT
 license-file: license.txt
 author: John Millikin <jmillikin@gmail.com>
@@ -20,7 +20,7 @@ source-repository head
 source-repository this
   type: bazaar
   location: https://john-millikin.com/branches/chell/0.2/
-  tag: chell_0.2
+  tag: chell_0.2.1
 
 library
   hs-source-dirs: lib
