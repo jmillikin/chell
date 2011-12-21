@@ -15,11 +15,11 @@ description:
 
 source-repository head
   type: bazaar
-  location: https://john-millikin.com/software/chell/
+  location: https://john-millikin.com/branches/chell/0.2/
 
 source-repository this
   type: bazaar
-  location: https://john-millikin.com/software/chell/
+  location: https://john-millikin.com/branches/chell/0.2/
   tag: chell_0.2
 
 library
