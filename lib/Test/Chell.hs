@@ -183,26 +183,25 @@ assertions name io = test (assertionsTest name io)
 -- Most users should use 'assertions' instead, to avoid the extra wrapping
 -- step.
 assertionsTest :: Text -> Assertions a -> Test
-assertionsTest name testm = Test name io where
-	io opts = do
-		noteRef <- newIORef []
-		afterTestRef <- newIORef []
-		
-		let getNotes = fmap reverse (readIORef noteRef)
-		
-		let getResult = do
-			res <- unAssertions testm (noteRef, afterTestRef, [])
-			case res of
-				(_, (_, _, [])) -> do
-					notes <- getNotes
-					return (TestPassed notes)
-				(_, (_, _, fs)) -> do
-					notes <- getNotes
-					return (TestFailed notes (reverse fs))
-		
-		Control.Exception.finally
-			(handleJankyIO opts getResult getNotes)
-			(runAfterTest afterTestRef)
+assertionsTest name testm = Test name $ \opts -> do
+	noteRef <- newIORef []
+	afterTestRef <- newIORef []
+	
+	let getNotes = fmap reverse (readIORef noteRef)
+	
+	let getResult = do
+		res <- unAssertions testm (noteRef, afterTestRef, [])
+		case res of
+			(_, (_, _, [])) -> do
+				notes <- getNotes
+				return (TestPassed notes)
+			(_, (_, _, fs)) -> do
+				notes <- getNotes
+				return (TestFailed notes (reverse fs))
+	
+	Control.Exception.finally
+		(handleJankyIO opts getResult getNotes)
+		(runAfterTest afterTestRef)
 
 runAfterTest :: IORef [IO ()] -> IO ()
 runAfterTest ref = readIORef ref >>= loop where
