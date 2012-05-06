@@ -30,6 +30,7 @@ module Test.Chell
 	, Test.Chell.fail
 	, trace
 	, note
+	, afterTest
 	
 	-- ** Assertions
 	, equal
@@ -153,7 +154,7 @@ instance IsAssertion Bool where
 		then AssertionPassed
 		else AssertionFailed "$assert: boolean assertion failed"))
 
-type TestState = (IORef [(Text, Text)], [Failure])
+type TestState = (IORef [(Text, Text)], IORef [IO ()], [Failure])
 newtype Assertions a = Assertions { unAssertions :: TestState -> IO (Maybe a, TestState) }
 
 instance Functor Assertions where
@@ -188,23 +189,31 @@ assertions :: Text -> Assertions a -> Suite
 assertions name testm = test (Test name io) where
 	io opts = do
 		noteRef <- newIORef []
+		afterTestRef <- newIORef []
 		
 		let getNotes = fmap reverse (readIORef noteRef)
 		
 		let getResult = do
-			res <- unAssertions testm (noteRef, [])
+			res <- unAssertions testm (noteRef, afterTestRef, [])
 			case res of
-				(_, (_, [])) -> do
+				(_, (_, _, [])) -> do
 					notes <- getNotes
 					return (TestPassed notes)
-				(_, (_, fs)) -> do
+				(_, (_, _, fs)) -> do
 					notes <- getNotes
 					return (TestFailed notes (reverse fs))
 		
-		handleJankyIO opts getResult getNotes
+		Control.Exception.finally
+			(handleJankyIO opts getResult getNotes)
+			(runAfterTest afterTestRef)
+
+runAfterTest :: IORef [IO ()] -> IO ()
+runAfterTest ref = readIORef ref >>= loop where
+	loop [] = return ()
+	loop (io:ios) = Control.Exception.finally (loop ios) io
 
 addFailure :: Maybe TH.Loc -> Text -> Assertions ()
-addFailure maybe_loc msg = Assertions $ \(notes, fs) -> do
+addFailure maybe_loc msg = Assertions $ \(notes, afterTestRef, fs) -> do
 	let loc = do
 		th_loc <- maybe_loc
 		return $ Location
@@ -212,7 +221,7 @@ addFailure maybe_loc msg = Assertions $ \(notes, fs) -> do
 			, locationModule = Data.Text.pack (TH.loc_module th_loc)
 			, locationLine = toInteger (fst (TH.loc_start th_loc))
 			}
-	return (Just (), (notes, Failure loc msg : fs))
+	return (Just (), (notes, afterTestRef, Failure loc msg : fs))
 
 die :: Assertions a
 die = Assertions (\s -> return (Nothing, s))
@@ -238,9 +247,16 @@ trace msg = liftIO (Data.Text.IO.putStrLn msg)
 
 -- | Attach metadata to a test run. This will be included in reports.
 note :: Text -> Text -> Assertions ()
-note key value = Assertions (\(notes, fs) -> do
+note key value = Assertions (\(notes, afterTestRef, fs) -> do
 	modifyIORef notes ((key, value) :)
-	return (Just (), (notes, fs)))
+	return (Just (), (notes, afterTestRef, fs)))
+
+-- | Register an IO action to be run after the test completes. This action
+-- will run even if the test failed or threw an exception.
+afterTest :: IO () -> Assertions ()
+afterTest io = Assertions (\(notes, ref, fs) -> do
+	modifyIORef ref (io :)
+	return (Just (), (notes, ref, fs)))
 
 liftLoc :: TH.Loc -> TH.Q TH.Exp
 liftLoc loc = [| TH.Loc filename package module_ start end |] where
