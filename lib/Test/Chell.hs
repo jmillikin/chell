@@ -361,7 +361,7 @@ greater x y = pure (x > y) ("greater: " ++ show x ++ " is not greater than " ++ 
 
 -- | Assert a value is greater than or equal to another.
 greaterEqual :: (Ord a, Show a) => a -> a -> Assertion
-greaterEqual x y = pure (x > y) ("greaterEqual: " ++ show x ++ " is not greater than or equal to " ++ show y)
+greaterEqual x y = pure (x >= y) ("greaterEqual: " ++ show x ++ " is not greater than or equal to " ++ show y)
 
 -- | Assert a value is less than another.
 lesser :: (Ord a, Show a) => a -> a -> Assertion
