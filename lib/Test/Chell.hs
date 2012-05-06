@@ -25,6 +25,7 @@ module Test.Chell
 	, IsAssertion
 	, Assertions
 	, assertions
+	, assertionsTest
 	, assert
 	, expect
 	, Test.Chell.fail
@@ -172,7 +173,17 @@ instance MonadIO Assertions where
 --     $assert (equal 1 1)
 -- @
 assertions :: Text -> Assertions a -> Suite
-assertions name testm = test (Test name io) where
+assertions name io = test (assertionsTest name io)
+
+-- | Convert a sequence of pass/fail assertions into a runnable test.
+--
+-- This is easier to use than 'assertions' when the result is going to be
+-- modified (eg, by a wrapper) before being used in a test suite.
+--
+-- Most users should use 'assertions' instead, to avoid the extra wrapping
+-- step.
+assertionsTest :: Text -> Assertions a -> Test
+assertionsTest name testm = Test name io where
 	io opts = do
 		noteRef <- newIORef []
 		afterTestRef <- newIORef []
