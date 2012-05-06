@@ -57,6 +57,7 @@ module Test.Chell
 	, runTest
 	
 	, TestOptions
+	, defaultTestOptions
 	, testOptionSeed
 	, testOptionTimeout
 	, TestResult (..)
@@ -85,21 +86,6 @@ import qualified Language.Haskell.TH as TH
 
 import           Test.Chell.Main (defaultMain)
 import           Test.Chell.Types
-
--- | Get the RNG seed for this test run. The seed is generated once, in
--- 'defaultMain', and used for all tests. It is also logged to reports using
--- a note.
---
--- Users may specify a seed using the @--seed@ command-line option.
-testOptionSeed :: TestOptions -> Int
-testOptionSeed = testOptionSeed_
-
--- | An optional timeout, in millseconds. Tests which run longer than this
--- timeout will be aborted.
---
--- Users may specify a timeout using the @--timeout@ command-line option.
-testOptionTimeout :: TestOptions -> Maybe Int
-testOptionTimeout = testOptionTimeout_
 
 -- | Conditionally skip tests. Use this to avoid commenting out tests
 -- which are currently broken, or do not work on the current platform.

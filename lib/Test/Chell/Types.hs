@@ -14,10 +14,36 @@ instance Show Test where
 	show (Test name _) = "<Test " ++ show name ++ ">"
 
 data TestOptions = TestOptions
-	{ testOptionSeed_ :: Int
-	, testOptionTimeout_ :: Maybe Int
+	{
+	
+	-- | Get the RNG seed for this test run. The seed is generated once, in
+	-- 'defaultMain', and used for all tests. It is also logged to reports
+	-- using a note.
+	--
+	-- When using 'defaultMain', users may specify a seed using the
+	-- @--seed@ command-line option.
+	  testOptionSeed :: Int
+	
+	-- | An optional timeout, in millseconds. Tests which run longer than
+	-- this timeout will be aborted.
+	--
+	-- When using 'defaultMain', users may specify a timeout using the
+	-- @--timeout@ command-line option.
+	, testOptionTimeout :: Maybe Int
 	}
 	deriving (Show, Eq)
+
+-- | Default test options.
+--
+-- @
+--'testOptionSeed' defaultTestOptions = 0
+--'testOptionTimeout' defaultTestOptions = Nothing
+-- @
+defaultTestOptions :: TestOptions
+defaultTestOptions = TestOptions
+	{ testOptionSeed = 0
+	, testOptionTimeout = Nothing
+	}
 
 -- | @testName (Test name _) = name@
 testName :: Test -> Text
@@ -30,13 +56,13 @@ runTest (Test _ io) options = handleJankyIO options (io options) (return [])
 
 handleJankyIO :: TestOptions -> IO TestResult -> IO [(Text, Text)] -> IO TestResult
 handleJankyIO opts getResult getNotes = do
-	let withTimeout = case testOptionTimeout_ opts of
+	let withTimeout = case testOptionTimeout opts of
 		Just time -> timeout (time * 1000)
 		Nothing -> fmap Just
 	
 	let hitTimeout = Data.Text.pack str where
 		str = "Test timed out after " ++ show time ++ " milliseconds"
-		Just time = testOptionTimeout_ opts
+		Just time = testOptionTimeout opts
 	
 	let errorExc :: SomeException -> Text
 	    errorExc exc = Data.Text.pack ("Test aborted due to exception: " ++ show exc)

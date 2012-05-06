@@ -120,9 +120,9 @@ defaultMain suites = do
 		Just s -> return s
 		Nothing -> randomIO
 	
-	let testOptions = TestOptions
-		{ testOptionSeed_ = seed
-		, testOptionTimeout_ = getTimeoutOpt options
+	let testOptions = defaultTestOptions
+		{ testOptionSeed = seed
+		, testOptionTimeout = getTimeoutOpt options
 		}
 	
 	let verbose = elem OptionVerbose options
