@@ -99,6 +99,12 @@ data Location = Location
 	}
 	deriving (Show, Eq)
 
+data ColorMode
+	= ColorModeAuto
+	| ColorModeAlways
+	| ColorModeNever
+	deriving (Enum)
+
 -- | A tree of 'Test's; use the 'test' and 'suite' helper functions to build
 -- up a 'Suite'.
 data Suite = Suite Text [Suite]

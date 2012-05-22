@@ -56,6 +56,10 @@ source-repository this
   location: https://john-millikin.com/branches/chell/0.2/
   tag: chell_0.2.4
 
+flag color-output
+  description: Enable colored output in test results
+  default: True
+
 library
   hs-source-dirs: lib
   ghc-options: -Wall -O2
@@ -71,9 +75,14 @@ library
     , text >= 0.7
     , transformers >= 0.2
 
+  if flag(color-output)
+    build-depends:
+        ansi-terminal >= 0.5 && < 0.6
+
   exposed-modules:
     Test.Chell
 
   other-modules:
     Test.Chell.Main
+    Test.Chell.Output
     Test.Chell.Types

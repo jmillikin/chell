@@ -5,7 +5,7 @@ module Test.Chell.Main
 	( defaultMain
 	) where
 
-import           Control.Monad (forM, forM_, unless, when)
+import           Control.Monad (forM, forM_, when)
 import           Control.Monad.Trans.Class (lift)
 import qualified Control.Monad.Trans.State as State
 import qualified Control.Monad.Trans.Writer as Writer
@@ -23,6 +23,7 @@ import           Text.Printf (printf)
 import qualified Filesystem.Path.CurrentOS as Path
 import           Options
 
+import           Test.Chell.Output
 import           Test.Chell.Types
 
 defineOptions "MainOptions" $ do
@@ -54,6 +55,17 @@ defineOptions "MainOptions" $ do
 		, optionDefault = ""
 		, optionDescription = "The maximum duration of a test, in milliseconds."
 		})
+	
+	option "optColor" (\o -> o
+		{ optionLongFlags = ["color"]
+		, optionType = optionTypeEnum ''ColorMode
+			[ ("always", ColorModeAlways)
+			, ("never", ColorModeNever)
+			, ("auto", ColorModeAuto)
+			]
+		, optionDefault = "auto"
+		, optionDescription = "Whether to enable color ('always', 'auto', or 'never')."
+		})
 
 -- | A simple default main function, which runs a list of tests and logs
 -- statistics to stderr.
@@ -81,13 +93,21 @@ defaultMain suites = runCommand $ \opts args -> do
 		then allTests
 		else filter (matchesFilter args) allTests
 	
+	-- output mode
+	output <- case optColor opts of
+		ColorModeNever -> return (plainOutput (optVerbose opts))
+		ColorModeAlways -> return (colorOutput (optVerbose opts))
+		ColorModeAuto -> do
+			isTerm <- IO.hIsTerminalDevice IO.stdout
+			return $ if isTerm
+				then colorOutput (optVerbose opts)
+				else plainOutput (optVerbose opts)
+	
 	-- run tests
 	results <- forM tests $ \t -> do
-		when (optVerbose opts) $ do
-			putStr "[ RUN   ] "
-			Data.Text.IO.putStrLn (testName t)
+		outputStart output t
 		result <- runTest t testOptions
-		printResult (optVerbose opts) t result
+		outputResult output t result
 		return (t, result)
 	
 	-- generate reports
@@ -113,49 +133,6 @@ matchesFilter strFilters = check where
 	filters = map Data.Text.pack strFilters
 	check t = any (matchName (testName t)) filters
 	matchName name f = f == name || Data.Text.isPrefixOf (Data.Text.append f ".") name
-
-printResult :: Bool -> Test -> TestResult -> IO ()
-printResult verbose t result = case result of
-	TestPassed _ -> when verbose $ do
-		putStr "[ PASS  ] "
-		Data.Text.IO.putStrLn (testName t)
-	TestSkipped -> when verbose $ do
-		putStr "[ SKIP  ] "
-		Data.Text.IO.putStrLn (testName t)
-	TestFailed notes fs -> do
-		putStr "[ FAIL  ] "
-		Data.Text.IO.putStrLn (testName t)
-		unless (null notes) $ do
-			forM_ notes $ \(key, value) -> do
-				putStr "  note: "
-				Data.Text.IO.putStr key
-				putStr "="
-				Data.Text.IO.putStrLn value
-			putStrLn ""
-		forM_ fs $ \(Failure loc msg) -> do
-			putStr "  "
-			case loc of
-				Just loc' -> do
-					Data.Text.IO.putStr (locationFile loc')
-					putStr ":"
-					putStrLn (show (locationLine loc'))
-				Nothing -> return ()
-			putStr "  "
-			Data.Text.IO.putStr msg
-			putStrLn "\n"
-	TestAborted notes msg -> do
-		putStr "[ ABORT ] "
-		Data.Text.IO.putStrLn (testName t)
-		unless (null notes) $ do
-			forM_ notes $ \(key, value) -> do
-				putStr "  note: "
-				Data.Text.IO.putStr key
-				putStr "="
-				Data.Text.IO.putStrLn value
-			putStrLn ""
-		putStr "  "
-		Data.Text.IO.putStr msg
-		putStrLn "\n"
 
 type Report = [(Test, TestResult)] -> Text
 
