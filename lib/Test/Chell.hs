@@ -32,6 +32,8 @@ module Test.Chell
 	, trace
 	, note
 	, afterTest
+	, requireLeft
+	, requireRight
 	
 	-- ** Assertions
 	, equal
@@ -253,6 +255,52 @@ afterTest :: IO () -> Assertions ()
 afterTest io = Assertions (\(notes, ref, fs) -> do
 	modifyIORef ref (io :)
 	return (Just (), (notes, ref, fs)))
+
+-- | Require an 'Either' value to be 'Left', and return its contents. If
+-- the value is 'Right', fail the test.
+--
+-- 'requireLeft' is a Template Haskell macro, to retain the source-file
+-- location from which it was used. Its effective type is:
+--
+-- @
+-- $requireLeft :: 'Show' b => 'Either' a b -> 'Assertions' a
+-- @
+requireLeft :: TH.Q TH.Exp
+requireLeft = do
+	loc <- TH.location
+	let qloc = liftLoc loc
+	[| requireLeftAt $qloc |]
+
+requireLeftAt :: Show b => TH.Loc -> Either a b -> Assertions a
+requireLeftAt loc val = case val of
+	Left a -> return a
+	Right b -> do
+		let dummy = Right b `asTypeOf` Left ()
+		addFailure (Just loc) (Data.Text.pack ("requireLeft: received " ++ showsPrec 11 dummy ""))
+		die
+
+-- | Require an 'Either' value to be 'Right', and return its contents. If
+-- the value is 'Left', fail the test.
+--
+-- 'requireRight' is a Template Haskell macro, to retain the source-file
+-- location from which it was used. Its effective type is:
+--
+-- @
+-- $requireRight :: 'Show' a => 'Either' a b -> 'Assertions' b
+-- @
+requireRight :: TH.Q TH.Exp
+requireRight = do
+	loc <- TH.location
+	let qloc = liftLoc loc
+	[| requireRightAt $qloc |]
+
+requireRightAt :: Show a => TH.Loc -> Either a b -> Assertions b
+requireRightAt loc val = case val of
+	Left a -> do
+		let dummy = Left a `asTypeOf` Right ()
+		addFailure (Just loc) (Data.Text.pack ("requireRight: received " ++ showsPrec 11 dummy ""))
+		die
+	Right b -> return b
 
 liftLoc :: TH.Loc -> TH.Q TH.Exp
 liftLoc loc = [| TH.Loc filename package module_ start end |] where
