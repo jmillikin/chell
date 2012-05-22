@@ -5,7 +5,7 @@ module Test.Chell.Main
 	( defaultMain
 	) where
 
-import           Control.Monad (forM, forM_, when)
+import           Control.Monad (forM, forM_, unless, when)
 import           Control.Monad.Trans.Class (lift)
 import qualified Control.Monad.Trans.State as State
 import qualified Control.Monad.Trans.Writer as Writer
@@ -83,6 +83,9 @@ defaultMain suites = runCommand $ \opts args -> do
 	
 	-- run tests
 	results <- forM tests $ \t -> do
+		when (optVerbose opts) $ do
+			putStr "[ RUN   ] "
+			Data.Text.IO.putStrLn (testName t)
 		result <- runTest t testOptions
 		printResult (optVerbose opts) t result
 		return (t, result)
@@ -114,42 +117,45 @@ matchesFilter strFilters = check where
 printResult :: Bool -> Test -> TestResult -> IO ()
 printResult verbose t result = case result of
 	TestPassed _ -> when verbose $ do
-		Data.Text.IO.putStr (testName t)
-		putStrLn ": PASS"
+		putStr "[ PASS  ] "
+		Data.Text.IO.putStrLn (testName t)
 	TestSkipped -> when verbose $ do
-		Data.Text.IO.putStr (testName t)
-		putStrLn ": SKIPPED"
+		putStr "[ SKIP  ] "
+		Data.Text.IO.putStrLn (testName t)
 	TestFailed notes fs -> do
-		putStrLn (replicate 70 '=')
-		Data.Text.IO.putStr (testName t)
-		putStrLn ": FAILED"
-		forM_ notes $ \(key, value) -> do
-			putStr "\t"
-			Data.Text.IO.putStr key
-			putStr "="
-			Data.Text.IO.putStrLn value
-		putStrLn (replicate 70 '=')
+		putStr "[ FAIL  ] "
+		Data.Text.IO.putStrLn (testName t)
+		unless (null notes) $ do
+			forM_ notes $ \(key, value) -> do
+				putStr "  note: "
+				Data.Text.IO.putStr key
+				putStr "="
+				Data.Text.IO.putStrLn value
+			putStrLn ""
 		forM_ fs $ \(Failure loc msg) -> do
+			putStr "  "
 			case loc of
 				Just loc' -> do
 					Data.Text.IO.putStr (locationFile loc')
 					putStr ":"
 					putStrLn (show (locationLine loc'))
 				Nothing -> return ()
+			putStr "  "
 			Data.Text.IO.putStr msg
-			putStr "\n\n"
+			putStrLn "\n"
 	TestAborted notes msg -> do
-		putStrLn (replicate 70 '=')
-		Data.Text.IO.putStr (testName t)
-		putStrLn ": ABORTED"
-		forM_ notes $ \(key, value) -> do
-			putStr "\t"
-			Data.Text.IO.putStr key
-			putStr "="
-			Data.Text.IO.putStrLn value
-		putStrLn (replicate 70 '=')
+		putStr "[ ABORT ] "
+		Data.Text.IO.putStrLn (testName t)
+		unless (null notes) $ do
+			forM_ notes $ \(key, value) -> do
+				putStr "  note: "
+				Data.Text.IO.putStr key
+				putStr "="
+				Data.Text.IO.putStrLn value
+			putStrLn ""
+		putStr "  "
 		Data.Text.IO.putStr msg
-		putStr "\n\n"
+		putStrLn "\n"
 
 type Report = [(Test, TestResult)] -> Text
 
