@@ -82,7 +82,15 @@ colorOutputResult v t (TestPassed _) = when v $ do
 	Data.Text.IO.putStrLn (testName t)
 	putStrLn ""
 colorOutputResult v t TestSkipped = when v $ do
-	putStr "[ SKIP  ] "
+	putStr "[ "
+	AnsiTerminal.setSGR
+		[ AnsiTerminal.SetColor AnsiTerminal.Foreground AnsiTerminal.Vivid AnsiTerminal.Yellow
+		]
+	putStr "SKIP"
+	AnsiTerminal.setSGR
+		[ AnsiTerminal.Reset
+		]
+	putStr "  ] "
 	Data.Text.IO.putStrLn (testName t)
 	putStrLn ""
 colorOutputResult _ t (TestFailed notes fs) = do
