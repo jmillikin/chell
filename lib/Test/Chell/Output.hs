@@ -36,9 +36,11 @@ plainOutputResult :: Bool -> Test -> TestResult -> IO ()
 plainOutputResult v t (TestPassed _) = when v $ do
 	putStr "[ PASS  ] "
 	Data.Text.IO.putStrLn (testName t)
+	putStrLn ""
 plainOutputResult v t TestSkipped = when v $ do
 	putStr "[ SKIP  ] "
 	Data.Text.IO.putStrLn (testName t)
+	putStrLn ""
 plainOutputResult _ t (TestFailed notes fs) = do
 	putStr "[ FAIL  ] "
 	Data.Text.IO.putStrLn (testName t)
@@ -78,9 +80,11 @@ colorOutputResult v t (TestPassed _) = when v $ do
 		]
 	putStr "  ] "
 	Data.Text.IO.putStrLn (testName t)
+	putStrLn ""
 colorOutputResult v t TestSkipped = when v $ do
 	putStr "[ SKIP  ] "
 	Data.Text.IO.putStrLn (testName t)
+	putStrLn ""
 colorOutputResult _ t (TestFailed notes fs) = do
 	putStr "[ "
 	AnsiTerminal.setSGR
