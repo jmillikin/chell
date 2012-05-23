@@ -19,13 +19,8 @@ module Test.Chell
 	, skipWhen
 	
 	-- * Basic testing library
-	-- $doc-basic-testing
-	, Assertion (..)
-	, AssertionResult (..)
-	, IsAssertion
 	, Assertions
 	, assertions
-	, assertionsTest
 	, assert
 	, expect
 	, die
@@ -35,7 +30,7 @@ module Test.Chell
 	, requireLeft
 	, requireRight
 	
-	-- ** Assertions
+	-- ** Built-in assertions
 	, equal
 	, notEqual
 	, equalWithin
@@ -54,10 +49,17 @@ module Test.Chell
 	, IsText
 	, equalLines
 	
+	-- ** Custom Assertions
+	, IsAssertion
+	, Assertion
+	, assertionPassed
+	, assertionFailed
+	
 	-- * Constructing tests
 	, Test (..)
 	, testName
 	, runTest
+	, assertionsTest
 	
 	, TestOptions
 	, defaultTestOptions
@@ -126,22 +128,29 @@ skipWhen p = step where
 -- simple test suites where depending on a separate test framework is too
 -- much trouble.
 
-newtype Assertion = Assertion (IO AssertionResult)
-
-data AssertionResult
+data Assertion
 	= AssertionPassed
-	| AssertionFailed Text
+	| AssertionFailed String
+
+assertionPassed :: Assertion
+assertionPassed = AssertionPassed
+
+assertionFailed :: String -> Assertion
+assertionFailed = AssertionFailed
 
 class IsAssertion a where
-	toAssertion :: a -> Assertion
+	runAssertion :: a -> IO Assertion
 
 instance IsAssertion Assertion where
-	toAssertion = id
+	runAssertion = return
 
 instance IsAssertion Bool where
-	toAssertion x = Assertion (return (if x
-		then AssertionPassed
-		else AssertionFailed "$assert: boolean assertion failed"))
+	runAssertion x = return $ if x
+		then assertionPassed
+		else assertionFailed "boolean assertion failed"
+
+instance IsAssertion a => IsAssertion (IO a) where
+	runAssertion x = x >>= runAssertion
 
 type TestState = (IORef [(Text, Text)], IORef [IO ()], [Failure])
 newtype Assertions a = Assertions { unAssertions :: TestState -> IO (Maybe a, TestState) }
@@ -312,13 +321,12 @@ liftLoc loc = [| TH.Loc filename package module_ start end |] where
 
 assertAt :: IsAssertion assertion => TH.Loc -> Bool -> assertion -> Assertions ()
 assertAt loc fatal assertion = do
-	let Assertion io = toAssertion assertion
-	result <- liftIO io
+	result <- liftIO (runAssertion assertion)
 	case result of
 		AssertionPassed -> return ()
 		AssertionFailed err -> if fatal
-			then dieAt loc err
-			else addFailure (Just loc) err
+			then dieAt loc (Data.Text.pack err)
+			else addFailure (Just loc) (Data.Text.pack err)
 
 -- | Run an 'Assertion'. If the assertion fails, the test will immediately
 -- fail.
@@ -351,8 +359,8 @@ expect = do
 	[| assertAt $qloc False |]
 
 pure :: Bool -> String -> Assertion
-pure True _ = Assertion (return AssertionPassed)
-pure False err = Assertion (return (AssertionFailed (Data.Text.pack err)))
+pure True  _   = assertionPassed
+pure False err = AssertionFailed err
 
 -- | Assert that two values are equal.
 equal :: (Show a, Eq a) => a -> a -> Assertion
@@ -393,27 +401,27 @@ right x = pure (isRight x) ("right: received Left") where
 -- | Assert that some computation throws an exception matching the provided
 -- predicate. This is mostly useful for exception types which do not have an
 -- instance for @Eq@, such as @'Control.Exception.ErrorCall'@.
-throws :: Exception err => (err -> Bool) -> IO a -> Assertion
-throws p io = Assertion (do
+throws :: Exception err => (err -> Bool) -> IO a -> IO Assertion
+throws p io = do
 	either_exc <- Control.Exception.try io
-	return (case either_exc of
+	return $ case either_exc of
 		Left exc -> if p exc
-			then AssertionPassed
-			else AssertionFailed (Data.Text.pack ("throws: exception " ++ show exc ++ " did not match predicate"))
-		Right _ -> AssertionFailed (Data.Text.pack ("throws: no exception thrown"))))
+			then assertionPassed
+			else assertionFailed ("throws: exception " ++ show exc ++ " did not match predicate")
+		Right _ -> assertionFailed "throws: no exception thrown"
 
 -- | Assert that some computation throws an exception equal to the given
 -- exception. This is better than just checking that the correct type was
 -- thrown, because the test can also verify the exception contains the correct
 -- information.
-throwsEq :: (Eq err, Exception err, Show err) => err -> IO a -> Assertion
-throwsEq expected io = Assertion (do
+throwsEq :: (Eq err, Exception err, Show err) => err -> IO a -> IO Assertion
+throwsEq expected io = do
 	either_exc <- Control.Exception.try io
-	return (case either_exc of
+	return $ case either_exc of
 		Left exc -> if exc == expected
-			then AssertionPassed
-			else AssertionFailed (Data.Text.pack ("throwsEq: exception " ++ show exc ++ " is not equal to " ++ show expected))
-		Right _ -> AssertionFailed (Data.Text.pack ("throwsEq: no exception thrown"))))
+			then assertionPassed
+			else assertionFailed ("throwsEq: exception " ++ show exc ++ " is not equal to " ++ show expected)
+		Right _ -> assertionFailed "throwsEq: no exception thrown"
 
 -- | Assert a value is greater than another.
 greater :: (Ord a, Show a) => a -> a -> Assertion
