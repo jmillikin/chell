@@ -25,6 +25,7 @@ module Test.Chell
 	-- * Basic testing library
 	, Assertions
 	, assertions
+	, IsAssertion
 	, assert
 	, expect
 	, die
@@ -54,7 +55,6 @@ module Test.Chell
 	, equalLines
 	
 	-- ** Custom Assertions
-	, IsAssertion
 	, Assertion
 	, assertionPassed
 	, assertionFailed
@@ -65,10 +65,13 @@ module Test.Chell
 	, testName
 	, runTest
 	
+	-- ** Test options
 	, TestOptions
 	, defaultTestOptions
 	, testOptionSeed
 	, testOptionTimeout
+	
+	-- ** Test results
 	, TestResult (..)
 	, Failure (..)
 	, Location (..)

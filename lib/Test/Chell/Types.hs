@@ -8,7 +8,7 @@ module Test.Chell.Types
 	, testOptionSeed
 	, testOptionTimeout
 	
-	, TestResult(..) -- (..) is temporary
+	, TestResult(TestPassed, TestSkipped, TestFailed, TestAborted)
 	, testPassed
 	, testSkipped
 	, testFailed
@@ -92,6 +92,7 @@ data TestResult
 	| TestSkipped
 	| TestFailed [(String, String)] [Failure]
 	| TestAborted [(String, String)] String
+	| TestResultCaseMustHaveDefault
 	deriving (Show, Eq)
 
 -- TODO: notes

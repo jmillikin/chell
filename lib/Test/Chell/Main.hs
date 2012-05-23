@@ -191,6 +191,7 @@ jsonReport results = Writer.execWriter writer where
 			tell "\"}"
 			tellNotes notes
 			tell "}"
+		_ -> return ()
 	
 	escapeJSON = concatMap (\c -> case c of
 		'"' -> "\\\""
@@ -269,6 +270,7 @@ xmlReport results = Writer.execWriter writer where
 			tell "'/>\n"
 			tellNotes notes
 			tell "\t</test-run>\n"
+		_ -> return ()
 	
 	escapeXML = concatMap (\c -> case c of
 		'&' -> "&amp;"
@@ -339,6 +341,7 @@ textReport results = Writer.execWriter writer where
 			tell "\n"
 			tell msg
 			tell "\n\n"
+		_ -> return ()
 	
 	tellNotes notes = forM_ notes $ \(key, value) -> do
 		tell key
@@ -371,3 +374,4 @@ resultStatistics results = State.execState state (0, 0, 0, 0) where
 		TestSkipped{} -> State.modify (\(p, s, f, a) -> (p, s+1, f, a))
 		TestFailed{} ->  State.modify (\(p, s, f, a) -> (p, s, f+1, a))
 		TestAborted{} -> State.modify (\(p, s, f, a) -> (p, s, f, a+1))
+		_ -> return ()

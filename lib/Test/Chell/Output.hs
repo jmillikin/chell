@@ -56,6 +56,7 @@ plainOutputResult _ t (TestAborted notes msg) = do
 	putStr "  "
 	putStr msg
 	putStrLn "\n"
+plainOutputResult _ _ _ = return ()
 
 data ColorMode
 	= ColorModeAuto
@@ -130,6 +131,7 @@ colorOutputResult _ t (TestAborted notes msg) = do
 	putStr "  "
 	putStr msg
 	putStrLn "\n"
+colorOutputResult _ _ _ = return ()
 #endif
 
 printNotes :: [(String, String)] -> IO ()
