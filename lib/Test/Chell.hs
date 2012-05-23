@@ -129,6 +129,7 @@ skipWhen = skipWhen_
 data Assertion
 	= AssertionPassed
 	| AssertionFailed String
+	deriving (Eq, Show)
 
 assertionPassed :: Assertion
 assertionPassed = AssertionPassed

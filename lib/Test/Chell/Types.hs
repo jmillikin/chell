@@ -45,7 +45,7 @@ import           System.Timeout (timeout)
 data Test = Test String (TestOptions -> IO TestResult)
 
 instance Show Test where
-	show t = "<Test " ++ show (testName t) ++ ">"
+	showsPrec d (Test name _) = showParen (d > 10) (showString "Test " . shows name)
 
 -- | TODO
 test :: String -> (TestOptions -> IO TestResult) -> Test
@@ -130,12 +130,15 @@ location = Location "" "" 0
 
 -- | TODO
 data Suite = Suite String [SOT]
+	deriving (Show)
+
 data SOT
 	= SOT_Suite Suite
 	| SOT_Test Test
 
-instance Show Suite where
-	show s = "<Suite " ++ show (suiteName s) ++ ">"
+instance Show SOT where
+	showsPrec d (SOT_Test t) = showsPrec d t
+	showsPrec d (SOT_Suite s) = showsPrec d s
 
 class BuildSuite a where
 	addChildren :: Suite -> a
