@@ -66,9 +66,6 @@ module Test.Chell
 	, TestResult (..)
 	, Failure (..)
 	, Location (..)
-	
-	-- * Deprecated
-	, Test.Chell.fail
 	) where
 
 import qualified Control.Applicative
@@ -187,8 +184,6 @@ assertions name io = test (assertionsTest name io)
 --
 -- Most users should use 'assertions' instead, to avoid the extra wrapping
 -- step.
---
--- Since: 0.2.3
 assertionsTest :: Text -> Assertions a -> Test
 assertionsTest name testm = Test name $ \opts -> do
 	noteRef <- newIORef []
@@ -234,8 +229,6 @@ addFailure maybe_loc msg = Assertions $ \(notes, afterTestRef, fs) -> do
 -- @
 -- $die :: 'String' -> 'Assertions' a
 -- @
---
--- Since: 0.2.4
 die :: TH.Q TH.Exp
 die = do
 	loc <- TH.location
@@ -246,14 +239,6 @@ dieAt :: TH.Loc -> Text -> Assertions a
 dieAt loc msg = do
 	addFailure (Just loc) msg
 	Assertions (\s -> return (Nothing, s))
-
-{-# DEPRECATED fail "Test.Chell.fail is deprecated; use Test.Chell.die instead." #-}
--- | Deprecated in 0.2.4: use 'die' instead.
-fail :: TH.Q TH.Exp -- :: Text -> Assertions a
-fail = do
-	loc <- TH.location
-	let qloc = liftLoc loc
-	[| dieAt $qloc |]
 
 -- | Print a message from within a test. This is just a helper for debugging,
 -- so you don't have to import @Debug.Trace@.
@@ -268,8 +253,6 @@ note key value = Assertions (\(notes, afterTestRef, fs) -> do
 
 -- | Register an IO action to be run after the test completes. This action
 -- will run even if the test failed or threw an exception.
---
--- Since: 0.2.3
 afterTest :: IO () -> Assertions ()
 afterTest io = Assertions (\(notes, ref, fs) -> do
 	modifyIORef ref (io :)
@@ -284,8 +267,6 @@ afterTest io = Assertions (\(notes, ref, fs) -> do
 -- @
 -- $requireLeft :: 'Show' b => 'Either' a b -> 'Assertions' a
 -- @
---
--- Since: 0.2.4
 requireLeft :: TH.Q TH.Exp
 requireLeft = do
 	loc <- TH.location
@@ -308,8 +289,6 @@ requireLeftAt loc val = case val of
 -- @
 -- $requireRight :: 'Show' a => 'Either' a b -> 'Assertions' b
 -- @
---
--- Since: 0.2.4
 requireRight :: TH.Q TH.Exp
 requireRight = do
 	loc <- TH.location

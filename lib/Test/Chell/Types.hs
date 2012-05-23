@@ -39,8 +39,6 @@ data TestOptions = TestOptions
 --'testOptionSeed' defaultTestOptions = 0
 --'testOptionTimeout' defaultTestOptions = Nothing
 -- @
---
--- Since: 0.2.3
 defaultTestOptions :: TestOptions
 defaultTestOptions = TestOptions
 	{ testOptionSeed = 0
