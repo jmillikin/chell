@@ -244,8 +244,25 @@ dieAt loc msg = do
 
 -- | Print a message from within a test. This is just a helper for debugging,
 -- so you don't have to import @Debug.Trace@.
-trace :: String -> Assertions ()
-trace msg = liftIO (putStrLn msg)
+--
+-- 'trace' is a Template Haskell macro, to retain the source-file location
+-- from which it was used. Its effective type is:
+--
+-- @
+-- $trace :: 'String' -> 'Assertions' ()
+-- @
+trace :: TH.Q TH.Exp
+trace = do
+	loc <- TH.location
+	let qloc = liftLoc loc
+	[| traceAt $qloc |]
+
+traceAt :: TH.Loc -> String -> Assertions ()
+traceAt loc msg = liftIO $ do
+	let file = TH.loc_filename loc
+	let line = fst (TH.loc_start loc)
+	putStr ("[" ++ file ++ ":" ++ show line ++ "] ")
+	putStrLn msg
 
 -- | Attach metadata to a test run. This will be included in reports.
 note :: String -> String -> Assertions ()
