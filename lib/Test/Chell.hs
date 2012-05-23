@@ -28,7 +28,7 @@ module Test.Chell
 	, assertionsTest
 	, assert
 	, expect
-	, Test.Chell.fail
+	, die
 	, trace
 	, note
 	, afterTest
@@ -66,12 +66,15 @@ module Test.Chell
 	, TestResult (..)
 	, Failure (..)
 	, Location (..)
+	
+	-- * Deprecated
+	, Test.Chell.fail
 	) where
 
 import qualified Control.Applicative
 import qualified Control.Exception
 import           Control.Exception (Exception)
-import           Control.Monad (ap, liftM, when)
+import           Control.Monad (ap, liftM)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.Algorithm.Patience as Patience
 import qualified Data.ByteString.Char8
@@ -221,9 +224,26 @@ addFailure maybe_loc msg = Assertions $ \(notes, afterTestRef, fs) -> do
 			}
 	return (Just (), (notes, afterTestRef, Failure loc msg : fs))
 
-die :: Assertions a
-die = Assertions (\s -> return (Nothing, s))
+-- | Cause a test to immediately fail, with a message.
+--
+-- 'die' is a Template Haskell macro, to retain the source-file location from
+-- which it was used. Its effective type is:
+--
+-- @
+-- $die :: 'String' -> 'Assertions' a
+-- @
+die :: TH.Q TH.Exp
+die = do
+	loc <- TH.location
+	let qloc = liftLoc loc
+	[| \msg -> dieAt $qloc (Data.Text.pack ("die: " ++ msg)) |]
 
+dieAt :: TH.Loc -> Text -> Assertions a
+dieAt loc msg = do
+	addFailure (Just loc) msg
+	Assertions (\s -> return (Nothing, s))
+
+{-# DEPRECATED fail "Test.Chell.fail is deprecated; use Test.Chell.die instead." #-}
 -- | Cause a test to immediately fail, with a message.
 --
 -- 'Test.Chell.fail' is a Template Haskell macro, to retain the source-file
@@ -236,7 +256,7 @@ fail :: TH.Q TH.Exp -- :: Text -> Assertions a
 fail = do
 	loc <- TH.location
 	let qloc = liftLoc loc
-	[| \msg -> addFailure (Just $qloc) msg >> die |]
+	[| dieAt $qloc |]
 
 -- | Print a message from within a test. This is just a helper for debugging,
 -- so you don't have to import @Debug.Trace@.
@@ -276,8 +296,7 @@ requireLeftAt loc val = case val of
 	Left a -> return a
 	Right b -> do
 		let dummy = Right b `asTypeOf` Left ()
-		addFailure (Just loc) (Data.Text.pack ("requireLeft: received " ++ showsPrec 11 dummy ""))
-		die
+		dieAt loc (Data.Text.pack ("requireLeft: received " ++ showsPrec 11 dummy ""))
 
 -- | Require an 'Either' value to be 'Right', and return its contents. If
 -- the value is 'Left', fail the test.
@@ -298,8 +317,7 @@ requireRightAt :: Show a => TH.Loc -> Either a b -> Assertions b
 requireRightAt loc val = case val of
 	Left a -> do
 		let dummy = Left a `asTypeOf` Right ()
-		addFailure (Just loc) (Data.Text.pack ("requireRight: received " ++ showsPrec 11 dummy ""))
-		die
+		dieAt loc (Data.Text.pack ("requireRight: received " ++ showsPrec 11 dummy ""))
 	Right b -> return b
 
 liftLoc :: TH.Loc -> TH.Q TH.Exp
@@ -316,9 +334,9 @@ assertAt loc fatal assertion = do
 	result <- liftIO io
 	case result of
 		AssertionPassed -> return ()
-		AssertionFailed err -> do
-			addFailure (Just loc) err
-			when fatal die
+		AssertionFailed err -> if fatal
+			then dieAt loc err
+			else addFailure (Just loc) err
 
 -- | Run an 'Assertion'. If the assertion fails, the test will immediately
 -- fail.
