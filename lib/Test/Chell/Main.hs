@@ -21,7 +21,7 @@ import           Options
 import           Test.Chell.Output
 import           Test.Chell.Types
 
-defineOptions "MainOptions" $ do
+$(defineOptions "MainOptions" $ do
 	option "optVerbose" (\o -> o
 		{ optionShortFlags = ['v']
 		, optionLongFlags = ["verbose"]
@@ -61,6 +61,7 @@ defineOptions "MainOptions" $ do
 		, optionDefault = "auto"
 		, optionDescription = "Whether to enable color ('always', 'auto', or 'never')."
 		})
+	)
 
 -- | A simple default main function, which runs a list of tests and logs
 -- statistics to stderr.
