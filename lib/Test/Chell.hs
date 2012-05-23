@@ -397,16 +397,16 @@ nothing :: Maybe a -> Assertion
 nothing x = pure (isNothing x) ("nothing: received Just")
 
 -- | Assert that some value is @Left@.
-left :: Either a b -> Assertion
-left x = pure (isLeft x) ("left: received Right") where
-	isLeft (Left _) = True
-	isLeft (Right _) = False
+left :: Show b => Either a b -> Assertion
+left (Left _) = assertionPassed
+left (Right b) = assertionFailed ("left: received " ++ showsPrec 11 dummy "") where
+	dummy = Right b `asTypeOf` Left ()
 
 -- | Assert that some value is @Right@.
-right :: Either a b -> Assertion
-right x = pure (isRight x) ("right: received Left") where
-	isRight (Left _) = False
-	isRight (Right _) = True
+right :: Show a => Either a b -> Assertion
+right (Right _) = assertionPassed
+right (Left a) = assertionFailed ("right: received " ++ showsPrec 11 dummy "") where
+	dummy = Left a `asTypeOf` Right ()
 
 -- | Assert that some computation throws an exception matching the provided
 -- predicate. This is mostly useful for exception types which do not have an
