@@ -1,14 +1,17 @@
 {-# LANGUAGE CPP #-}
 
 module Test.Chell.Output
-	( Output(..)
+	( Output
+	, outputStart
+	, outputResult
+	
+	, ColorMode(..)
+	
 	, plainOutput
 	, colorOutput
 	) where
 
 import           Control.Monad (forM_, unless, when)
-import           Data.Text (Text)
-import qualified Data.Text.IO
 
 #ifdef MIN_VERSION_ansi_terminal
 import qualified System.Console.ANSI as AnsiTerminal
@@ -30,29 +33,35 @@ plainOutput v = Output
 plainOutputStart :: Bool -> Test -> IO ()
 plainOutputStart v t = when v $ do
 	putStr "[ RUN   ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 
 plainOutputResult :: Bool -> Test -> TestResult -> IO ()
 plainOutputResult v t (TestPassed _) = when v $ do
 	putStr "[ PASS  ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	putStrLn ""
 plainOutputResult v t TestSkipped = when v $ do
 	putStr "[ SKIP  ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	putStrLn ""
 plainOutputResult _ t (TestFailed notes fs) = do
 	putStr "[ FAIL  ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	printNotes notes
 	printFailures fs
 plainOutputResult _ t (TestAborted notes msg) = do
 	putStr "[ ABORT ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	printNotes notes
 	putStr "  "
-	Data.Text.IO.putStr msg
+	putStr msg
 	putStrLn "\n"
+
+data ColorMode
+	= ColorModeAuto
+	| ColorModeAlways
+	| ColorModeNever
+	deriving (Enum)
 
 colorOutput :: Bool -> Output
 #ifndef MIN_VERSION_ansi_terminal
@@ -66,7 +75,7 @@ colorOutput v = Output
 colorOutputStart :: Bool -> Test -> IO ()
 colorOutputStart v t = when v $ do
 	putStr "[ RUN   ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 
 colorOutputResult :: Bool -> Test -> TestResult -> IO ()
 colorOutputResult v t (TestPassed _) = when v $ do
@@ -79,7 +88,7 @@ colorOutputResult v t (TestPassed _) = when v $ do
 		[ AnsiTerminal.Reset
 		]
 	putStr "  ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	putStrLn ""
 colorOutputResult v t TestSkipped = when v $ do
 	putStr "[ "
@@ -91,7 +100,7 @@ colorOutputResult v t TestSkipped = when v $ do
 		[ AnsiTerminal.Reset
 		]
 	putStr "  ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	putStrLn ""
 colorOutputResult _ t (TestFailed notes fs) = do
 	putStr "[ "
@@ -103,7 +112,7 @@ colorOutputResult _ t (TestFailed notes fs) = do
 		[ AnsiTerminal.Reset
 		]
 	putStr "  ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	printNotes notes
 	printFailures fs
 colorOutputResult _ t (TestAborted notes msg) = do
@@ -116,31 +125,31 @@ colorOutputResult _ t (TestAborted notes msg) = do
 		[ AnsiTerminal.Reset
 		]
 	putStr " ] "
-	Data.Text.IO.putStrLn (testName t)
+	putStrLn (testName t)
 	printNotes notes
 	putStr "  "
-	Data.Text.IO.putStr msg
+	putStr msg
 	putStrLn "\n"
 #endif
 
-printNotes :: [(Text, Text)] -> IO ()
+printNotes :: [(String, String)] -> IO ()
 printNotes notes = unless (null notes) $ do
 	forM_ notes $ \(key, value) -> do
 		putStr "  note: "
-		Data.Text.IO.putStr key
+		putStr key
 		putStr "="
-		Data.Text.IO.putStrLn value
+		putStrLn value
 	putStrLn ""
 
 printFailures :: [Failure] -> IO ()
-printFailures fs = forM_ fs $ \(Failure loc msg) -> do
+printFailures fs = forM_ fs $ \f -> do
 	putStr "  "
-	case loc of
+	case failureLocation f of
 		Just loc' -> do
-			Data.Text.IO.putStr (locationFile loc')
+			putStr (locationFile loc')
 			putStr ":"
 			putStrLn (show (locationLine loc'))
 		Nothing -> return ()
 	putStr "  "
-	Data.Text.IO.putStr msg
+	putStr (failureMessage f)
 	putStrLn "\n"

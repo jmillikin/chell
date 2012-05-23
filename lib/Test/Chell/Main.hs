@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Test.Chell.Main
@@ -9,14 +8,10 @@ import           Control.Monad (forM, forM_, when)
 import           Control.Monad.Trans.Class (lift)
 import qualified Control.Monad.Trans.State as State
 import qualified Control.Monad.Trans.Writer as Writer
-import qualified Data.ByteString
 import           Data.Char (ord)
-import qualified Data.Text
-import           Data.Text (Text, pack)
-import qualified Data.Text.Encoding
-import qualified Data.Text.IO
+import           Data.List (isPrefixOf)
 import           System.Exit (exitSuccess, exitFailure)
-import qualified System.IO as IO
+import           System.IO (hPutStr, hPutStrLn, hIsTerminalDevice, stderr, stdout, withBinaryFile, IOMode(..))
 import           System.Random (randomIO)
 import           Text.Printf (printf)
 
@@ -35,11 +30,11 @@ defineOptions "MainOptions" $ do
 		, optionDescription = "Print more output"
 		})
 	
-	pathOption "optXmlReport" "xml-report" ""
+	pathOption "optXmlReport" "xml-report" Path.empty
 		"Write a parsable report to a given path, in XML."
-	pathOption "optJsonReport" "json-report" ""
+	pathOption "optJsonReport" "json-report" Path.empty
 		"Write a parsable report to a given path, in JSON."
-	pathOption "optTextReport" "text-report" ""
+	pathOption "optTextReport" "text-report" Path.empty
 		"Write a human-readable report to a given path."
 	
 	option "optSeed" (\o -> o
@@ -79,7 +74,7 @@ defaultMain suites = runCommand $ \opts args -> do
 		Nothing -> return Nothing
 		Just t -> if toInteger t * 1000 > toInteger (maxBound :: Int)
 			then do
-				IO.hPutStrLn IO.stderr "Test.Chell.defaultMain: Ignoring --timeout because it is too large."
+				hPutStrLn stderr "Test.Chell.defaultMain: Ignoring --timeout because it is too large."
 				return Nothing
 			else return (Just t)
 	let testOptions = defaultTestOptions
@@ -98,7 +93,7 @@ defaultMain suites = runCommand $ \opts args -> do
 		ColorModeNever -> return (plainOutput (optVerbose opts))
 		ColorModeAlways -> return (colorOutput (optVerbose opts))
 		ColorModeAuto -> do
-			isTerm <- IO.hIsTerminalDevice IO.stdout
+			isTerm <- hIsTerminalDevice stdout
 			return $ if isTerm
 				then colorOutput (optVerbose opts)
 				else plainOutput (optVerbose opts)
@@ -113,28 +108,25 @@ defaultMain suites = runCommand $ \opts args -> do
 	-- generate reports
 	let reports = getReports opts
 	forM_ reports $ \(path, fmt, toText) ->
-		IO.withBinaryFile path IO.WriteMode $ \h -> do
-			let text = toText results
-			let bytes = Data.Text.Encoding.encodeUtf8 text
+		withBinaryFile path WriteMode $ \h -> do
 			when (optVerbose opts) $ do
 				putStrLn ("Writing " ++ fmt ++ " report to " ++ show path)
-			Data.ByteString.hPut h bytes
+			hPutStr h (toText results)
 	
 	let stats = resultStatistics results
 	let (_, _, failed, aborted) = stats
-	Data.Text.IO.putStrLn (formatResultStatistics stats)
+	putStrLn (formatResultStatistics stats)
 	
 	if failed == 0 && aborted == 0
 		then exitSuccess
 		else exitFailure
 
 matchesFilter :: [String] -> Test -> Bool
-matchesFilter strFilters = check where
-	filters = map Data.Text.pack strFilters
+matchesFilter filters = check where
 	check t = any (matchName (testName t)) filters
-	matchName name f = f == name || Data.Text.isPrefixOf (Data.Text.append f ".") name
+	matchName name f = f == name || isPrefixOf (f ++ ".") name
 
-type Report = [(Test, TestResult)] -> Text
+type Report = [(Test, TestResult)] -> String
 
 getReports :: MainOptions -> [(String, String, Report)]
 getReports opts = concat [xml, json, text] where
@@ -148,7 +140,7 @@ getReports opts = concat [xml, json, text] where
 		p | Path.null p -> []
 		p -> [(Path.encodeString p, "text", textReport)]
 
-jsonReport :: [(Test, TestResult)] -> Text
+jsonReport :: [(Test, TestResult)] -> String
 jsonReport results = Writer.execWriter writer where
 	tell = Writer.tell
 	
@@ -172,18 +164,18 @@ jsonReport results = Writer.execWriter writer where
 			tell "{\"test\": \""
 			tell (escapeJSON (testName t))
 			tell "\", \"result\": \"failed\", \"failures\": ["
-			commas fs $ \(Failure loc msg) -> do
+			commas fs $ \f -> do
 				tell "{\"message\": \""
-				tell (escapeJSON msg)
+				tell (escapeJSON (failureMessage f))
 				tell "\""
-				case loc of
+				case failureLocation f of
 					Just loc' -> do
 						tell ", \"location\": {\"module\": \""
 						tell (escapeJSON (locationModule loc'))
 						tell "\", \"file\": \""
 						tell (escapeJSON (locationFile loc'))
 						tell "\", \"line\": "
-						tell (pack (show (locationLine loc')))
+						tell (show (locationLine loc'))
 						tell "}"
 					Nothing -> return ()
 				tell "}"
@@ -199,11 +191,11 @@ jsonReport results = Writer.execWriter writer where
 			tellNotes notes
 			tell "}"
 	
-	escapeJSON = Data.Text.concatMap (\c -> case c of
+	escapeJSON = concatMap (\c -> case c of
 		'"' -> "\\\""
 		'\\' -> "\\\\"
-		_ | ord c <= 0x1F -> pack (printf "\\u%04X" (ord c))
-		_ -> Data.Text.singleton c)
+		_ | ord c <= 0x1F -> printf "\\u%04X" (ord c)
+		_ -> [c])
 	
 	tellNotes notes = do
 		tell ", \"notes\": ["
@@ -225,7 +217,7 @@ jsonReport results = Writer.execWriter writer where
 		State.put True
 		lift (block x)
 
-xmlReport :: [(Test, TestResult)] -> Text
+xmlReport :: [(Test, TestResult)] -> String
 xmlReport results = Writer.execWriter writer where
 	tell = Writer.tell
 	
@@ -250,10 +242,10 @@ xmlReport results = Writer.execWriter writer where
 			tell "\t<test-run test='"
 			tell (escapeXML (testName t))
 			tell "' result='failed'>\n"
-			forM_ fs $ \(Failure loc msg) -> do
+			forM_ fs $ \f -> do
 				tell "\t\t<failure message='"
-				tell (escapeXML msg)
-				case loc of
+				tell (escapeXML (failureMessage f))
+				case failureLocation f of
 					Just loc' -> do
 						tell "'>\n"
 						tell "\t\t\t<location module='"
@@ -261,7 +253,7 @@ xmlReport results = Writer.execWriter writer where
 						tell "' file='"
 						tell (escapeXML (locationFile loc'))
 						tell "' line='"
-						tell (pack (show (locationLine loc')))
+						tell (show (locationLine loc'))
 						tell "'/>\n"
 						tell "\t\t</failure>\n"
 					Nothing -> tell "'/>\n"
@@ -277,13 +269,13 @@ xmlReport results = Writer.execWriter writer where
 			tellNotes notes
 			tell "\t</test-run>\n"
 	
-	escapeXML = Data.Text.concatMap (\c -> case c of
+	escapeXML = concatMap (\c -> case c of
 		'&' -> "&amp;"
 		'<' -> "&lt;"
 		'>' -> "&gt;"
 		'"' -> "&quot;"
 		'\'' -> "&apos;"
-		_ -> Data.Text.singleton c)
+		_ -> [c])
 	
 	tellNotes notes = forM_ notes $ \(key, value) -> do
 		tell "\t\t<note key=\""
@@ -292,7 +284,7 @@ xmlReport results = Writer.execWriter writer where
 		tell (escapeXML value)
 		tell "\"/>\n"
 
-textReport :: [(Test, TestResult)] -> Text
+textReport :: [(Test, TestResult)] -> String
 textReport results = Writer.execWriter writer where
 	tell = Writer.tell
 	
@@ -303,7 +295,7 @@ textReport results = Writer.execWriter writer where
 	
 	tellResult (t, result) = case result of
 		TestPassed notes -> do
-			tell (Data.Text.replicate 70 "=")
+			tell (replicate 70 '=')
 			tell "\n"
 			tell "PASSED: "
 			tell (testName t)
@@ -311,38 +303,38 @@ textReport results = Writer.execWriter writer where
 			tellNotes notes
 			tell "\n\n"
 		TestSkipped -> do
-			tell (Data.Text.replicate 70 "=")
+			tell (replicate 70 '=')
 			tell "\n"
 			tell "SKIPPED: "
 			tell (testName t)
 			tell "\n\n"
 		TestFailed notes fs -> do
-			tell (Data.Text.replicate 70 "=")
+			tell (replicate 70 '=')
 			tell "\n"
 			tell "FAILED: "
 			tell (testName t)
 			tell "\n"
 			tellNotes notes
-			tell (Data.Text.replicate 70 "-")
+			tell (replicate 70 '-')
 			tell "\n"
-			forM_ fs $ \(Failure loc msg) -> do
-				case loc of
+			forM_ fs $ \f -> do
+				case failureLocation f of
 					Just loc' -> do
 						tell (locationFile loc')
 						tell ":"
-						tell (pack (show (locationLine loc')))
+						tell (show (locationLine loc'))
 						tell "\n"
 					Nothing -> return ()
-				tell msg
+				tell (failureMessage f)
 				tell "\n\n"
 		TestAborted notes msg -> do
-			tell (Data.Text.replicate 70 "=")
+			tell (replicate 70 '=')
 			tell "\n"
 			tell "ABORTED: "
 			tell (testName t)
 			tell "\n"
 			tellNotes notes
-			tell (Data.Text.replicate 70 "-")
+			tell (replicate 70 '-')
 			tell "\n"
 			tell msg
 			tell "\n\n"
@@ -353,7 +345,7 @@ textReport results = Writer.execWriter writer where
 		tell value
 		tell "\n"
 
-formatResultStatistics :: (Integer, Integer, Integer, Integer) -> Text
+formatResultStatistics :: (Integer, Integer, Integer, Integer) -> String
 formatResultStatistics stats = Writer.execWriter writer where
 	writer = do
 		let (passed, skipped, failed, aborted) = stats
@@ -361,8 +353,8 @@ formatResultStatistics stats = Writer.execWriter writer where
 			then Writer.tell "PASS: "
 			else Writer.tell "FAIL: "
 		let putNum comma n what = Writer.tell $ if n == 1
-			then pack (comma ++ "1 test " ++ what)
-			else pack (comma ++ show n ++ " tests " ++ what)
+			then comma ++ "1 test " ++ what
+			else comma ++ show n ++ " tests " ++ what
 		
 		let total = sum [passed, skipped, failed, aborted]
 		putNum "" total "run"

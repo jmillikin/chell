@@ -1,17 +1,59 @@
-{-# LANGUAGE OverloadedStrings #-}
-
-module Test.Chell.Types where
+module Test.Chell.Types
+	( Test
+	, test
+	, testName
+	
+	, TestOptions
+	, defaultTestOptions
+	, testOptionSeed
+	, testOptionTimeout
+	
+	, TestResult(..) -- (..) is temporary
+	, testPassed
+	, testSkipped
+	, testFailed
+	, testAborted
+	
+	, Failure
+	, failure
+	, failureLocation
+	, failureMessage
+	
+	, Location
+	, location
+	, locationFile
+	, locationModule
+	, locationLine
+	
+	, Suite
+	, suite
+	, suiteName
+	, suiteTests
+	
+	, BuildSuite
+	, SuiteOrTest(..)
+	
+	, runTest
+	
+	, handleJankyIO
+	) where
 
 import qualified Control.Exception
 import           Control.Exception (SomeException, Handler(..), catches, throwIO)
-import qualified Data.Text
-import           Data.Text (Text)
 import           System.Timeout (timeout)
 
-data Test = Test Text (TestOptions -> IO TestResult)
+data Test = Test String (TestOptions -> IO TestResult)
 
 instance Show Test where
-	show (Test name _) = "<Test " ++ show name ++ ">"
+	show t = "<Test " ++ show (testName t) ++ ">"
+
+-- | TODO
+test :: String -> (TestOptions -> IO TestResult) -> Test
+test = Test
+
+-- | TODO
+testName :: Test -> String
+testName (Test name _) = name
 
 data TestOptions = TestOptions
 	{
@@ -45,22 +87,126 @@ defaultTestOptions = TestOptions
 	, testOptionTimeout = Nothing
 	}
 
--- | @testName (Test name _) = name@
-testName :: Test -> Text
-testName (Test name _) = name
+data TestResult
+	= TestPassed [(String, String)]
+	| TestSkipped
+	| TestFailed [(String, String)] [Failure]
+	| TestAborted [(String, String)] String
+	deriving (Show, Eq)
+
+-- TODO: notes
+
+-- | TODO
+testPassed :: TestResult
+testPassed = TestPassed []
+
+testSkipped :: TestResult
+testSkipped = TestSkipped
+
+testFailed :: [Failure] -> TestResult
+testFailed = TestFailed []
+
+testAborted :: String -> TestResult
+testAborted = TestAborted []
+
+data Failure = Failure
+	{ failureLocation :: Maybe Location
+	, failureMessage :: String
+	}
+	deriving (Show, Eq)
+
+failure :: Failure
+failure = Failure Nothing ""
+
+data Location = Location
+	{ locationFile :: String
+	, locationModule :: String
+	, locationLine :: Integer
+	}
+	deriving (Show, Eq)
+
+location :: Location
+location = Location "" "" 0
+
+-- | TODO
+data Suite = Suite String [SOT]
+data SOT
+	= SOT_Suite Suite
+	| SOT_Test Test
+
+instance Show Suite where
+	show s = "<Suite " ++ show (suiteName s) ++ ">"
+
+class BuildSuite a where
+	addChildren :: Suite -> a
+
+instance BuildSuite Suite where
+	addChildren (Suite name cs) = Suite name (reverse cs)
+
+class SuiteOrTest a where
+	toSOT :: a -> SOT
+	skipIf_ :: Bool -> a -> a
+	skipWhen_ :: IO Bool -> a -> a
+
+instance SuiteOrTest Suite where
+	toSOT = SOT_Suite
+	skipIf_ skip s@(Suite name children) = if skip
+		then Suite name (map skipSOT children)
+		else s
+	skipWhen_ p (Suite name children) = Suite name (map (skipWhenSOT p) children)
+
+instance SuiteOrTest Test where
+	toSOT = SOT_Test
+	skipIf_ skip t@(Test name _) = if skip
+		then Test name (\_ -> return TestSkipped)
+		else t
+	skipWhen_ p (Test name io) = Test name (\opts -> do
+		skip <- p
+		if skip then return TestSkipped else io opts)
+
+skipSOT :: SOT -> SOT
+skipSOT (SOT_Test (Test name _)) = SOT_Test (Test name (\_ -> return TestSkipped))
+skipSOT (SOT_Suite (Suite name cs)) = SOT_Suite (Suite name (map skipSOT cs))
+
+skipWhenSOT :: IO Bool -> SOT -> SOT
+skipWhenSOT p (SOT_Suite s) = SOT_Suite (skipWhen_ p s)
+skipWhenSOT p (SOT_Test t) = SOT_Test (skipWhen_ p t)
+
+instance (SuiteOrTest t, BuildSuite s) => BuildSuite (t -> s) where
+	addChildren (Suite name cs) = \b -> addChildren (Suite name (toSOT b : cs))
+
+suite :: BuildSuite a => String -> a
+suite name = addChildren (Suite name [])
+
+suiteName :: Suite -> String
+suiteName (Suite name _) = name
+
+-- | The full list of 'Test's contained within this 'Suite'. Each 'Test'
+-- is returned with its name modified to include the name of its parent
+-- 'Suite's.
+suiteTests :: Suite -> [Test]
+suiteTests = go "" where
+	prefixed prefix str = if null prefix
+		then str
+		else prefix ++ "." ++ str
+	
+	go prefix (Suite name children) = concatMap (step (prefixed prefix name)) children
+	
+	step prefix (SOT_Suite s) = go prefix s
+	step prefix (SOT_Test (Test name io)) = [Test (prefixed prefix name) io]
 
 -- | Run a test, wrapped in error handlers. This will return 'TestAborted' if
 -- the test throws an exception or times out.
 runTest :: Test -> TestOptions -> IO TestResult
 runTest (Test _ io) options = handleJankyIO options (io options) (return [])
 
-handleJankyIO :: TestOptions -> IO TestResult -> IO [(Text, Text)] -> IO TestResult
+handleJankyIO :: TestOptions -> IO TestResult -> IO [(String, String)] -> IO TestResult
 handleJankyIO opts getResult getNotes = do
 	let withTimeout = case testOptionTimeout opts of
 		Just time -> timeout (time * 1000)
 		Nothing -> fmap Just
 	
-	let hitTimeout = Data.Text.pack str where
+	let hitTimeout = str where
 		str = "Test timed out after " ++ show time ++ " milliseconds"
 		Just time = testOptionTimeout opts
 	
@@ -72,7 +218,7 @@ handleJankyIO opts getResult getNotes = do
 			return (TestAborted notes hitTimeout)
 		Just (Left err) -> do
 			notes <- getNotes
-			return (TestAborted notes (Data.Text.pack err))
+			return (TestAborted notes err)
 
 try :: IO a -> IO (Either String a)
 try io = catches (fmap Right io) [Handler handleAsync, Handler handleExc] where
@@ -81,57 +227,3 @@ try io = catches (fmap Right io) [Handler handleAsync, Handler handleExc] where
 	
 	handleExc :: SomeException -> IO (Either String a)
 	handleExc exc = return (Left ("Test aborted due to exception: " ++ show exc))
-
-data TestResult
-	= TestPassed [(Text, Text)]
-	| TestSkipped
-	| TestFailed [(Text, Text)] [Failure]
-	| TestAborted [(Text, Text)] Text
-	deriving (Show, Eq)
-
-data Failure = Failure (Maybe Location) Text
-	deriving (Show, Eq)
-
-data Location = Location
-	{ locationFile :: Text
-	, locationModule :: Text
-	, locationLine :: Integer
-	}
-	deriving (Show, Eq)
-
-data ColorMode
-	= ColorModeAuto
-	| ColorModeAlways
-	| ColorModeNever
-	deriving (Enum)
-
--- | A tree of 'Test's; use the 'test' and 'suite' helper functions to build
--- up a 'Suite'.
-data Suite = Suite Text [Suite]
-           | SuiteTest Test
-
-instance Show Suite where
-	show s = "<Suite " ++ show (suiteName s) ++ ">"
-
-test :: Test -> Suite
-test = SuiteTest
-
-suite :: Text -> [Suite] -> Suite
-suite = Suite
-
-suiteName :: Suite -> Text
-suiteName (Suite name _) = name
-suiteName (SuiteTest t) = testName t
-
--- | The full list of 'Test's contained within this 'Suite'. Each 'Test'
--- is returned with its name modified to include the name of its parent
--- 'Suite's.
-suiteTests :: Suite -> [Test]
-suiteTests = loop "" where
-	loop prefix s = let
-		name = if Data.Text.null prefix
-			then suiteName s
-			else Data.Text.concat [prefix, ".", suiteName s]
-		in case s of
-			Suite _ suites -> concatMap (loop name) suites
-			SuiteTest (Test _ io) -> [Test name io]

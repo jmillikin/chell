@@ -11,10 +11,15 @@ module Test.Chell
 	
 	-- * Test suites
 	, Suite
-	, suite
 	, suiteName
 	, suiteTests
-	, test
+	
+	-- ** Building test suites
+	, BuildSuite
+	, SuiteOrTest
+	, suite
+	
+	-- ** Skipping some tests
 	, skipIf
 	, skipWhen
 	
@@ -56,10 +61,10 @@ module Test.Chell
 	, assertionFailed
 	
 	-- * Constructing tests
-	, Test (..)
+	, Test
+	, test
 	, testName
 	, runTest
-	, assertionsTest
 	
 	, TestOptions
 	, defaultTestOptions
@@ -85,7 +90,6 @@ import           Data.IORef (IORef, newIORef, readIORef, modifyIORef)
 import qualified Data.Text
 import           Data.Text (Text)
 import qualified Data.Text.Lazy
-import qualified Data.Text.IO
 
 import qualified Language.Haskell.TH as TH
 
@@ -97,30 +101,25 @@ import           Test.Chell.Types
 --
 -- @
 --tests = 'suite' \"tests\"
---    [ 'skipIf' builtOnUnix test_WindowsSpecific
---    ]
+--    test_Foo
+--    ('skipIf' builtOnUnix test_WindowsSpecific)
+--    test_Bar
 -- @
 --
-skipIf :: Bool -> Suite -> Suite
-skipIf skip = if skip then step else id where
-	step (SuiteTest (Test name _)) = SuiteTest
-		(Test name (\_ -> return TestSkipped))
-	step (Suite name suites) = Suite name (map step suites)
+skipIf :: SuiteOrTest a => Bool -> a -> a
+skipIf = skipIf_
 
 -- | Conditionally skip tests, depending on the result of a runtime check. The
 -- predicate is checked before each test is started.
 --
 -- @
 --tests = 'suite' \"tests\"
---    [ 'skipWhen' noNetwork test_PingGoogle
---    ]
+--    test_Foo
+--    ('skipWhen' noNetwork test_PingGoogle)
+--    test_Bar
 -- @
-skipWhen :: IO Bool -> Suite -> Suite
-skipWhen p = step where
-	step (SuiteTest (Test name io)) = SuiteTest (Test name (\opts -> do
-		skip <- p
-		if skip then return TestSkipped else io opts))
-	step (Suite name suites) = Suite name (map step suites)
+skipWhen :: SuiteOrTest a => IO Bool -> a -> a
+skipWhen = skipWhen_
 
 -- $doc-basic-testing
 --
@@ -152,7 +151,7 @@ instance IsAssertion Bool where
 instance IsAssertion a => IsAssertion (IO a) where
 	runAssertion x = x >>= runAssertion
 
-type TestState = (IORef [(Text, Text)], IORef [IO ()], [Failure])
+type TestState = (IORef [(String, String)], IORef [IO ()], [Failure])
 newtype Assertions a = Assertions { unAssertions :: TestState -> IO (Maybe a, TestState) }
 
 instance Functor Assertions where
@@ -178,23 +177,13 @@ instance MonadIO Assertions where
 -- | Convert a sequence of pass/fail assertions into a runnable test.
 --
 -- @
--- test_Equality :: Suite
+-- test_Equality :: Test
 -- test_Equality = assertions \"equality\" $ do
 --     $assert (1 == 1)
 --     $assert (equal 1 1)
 -- @
-assertions :: Text -> Assertions a -> Suite
-assertions name io = test (assertionsTest name io)
-
--- | Convert a sequence of pass/fail assertions into a runnable test.
---
--- This is easier to use than 'assertions' when the result is going to be
--- modified (eg, by a wrapper) before being used in a test suite.
---
--- Most users should use 'assertions' instead, to avoid the extra wrapping
--- step.
-assertionsTest :: Text -> Assertions a -> Test
-assertionsTest name testm = Test name $ \opts -> do
+assertions :: String -> Assertions a -> Test
+assertions name testm = test name $ \opts -> do
 	noteRef <- newIORef []
 	afterTestRef <- newIORef []
 	
@@ -219,16 +208,20 @@ runAfterTest ref = readIORef ref >>= loop where
 	loop [] = return ()
 	loop (io:ios) = Control.Exception.finally (loop ios) io
 
-addFailure :: Maybe TH.Loc -> Text -> Assertions ()
+addFailure :: Maybe TH.Loc -> String -> Assertions ()
 addFailure maybe_loc msg = Assertions $ \(notes, afterTestRef, fs) -> do
 	let loc = do
 		th_loc <- maybe_loc
-		return $ Location
-			{ locationFile = Data.Text.pack (TH.loc_filename th_loc)
-			, locationModule = Data.Text.pack (TH.loc_module th_loc)
+		return $ location
+			{ locationFile = TH.loc_filename th_loc
+			, locationModule = TH.loc_module th_loc
 			, locationLine = toInteger (fst (TH.loc_start th_loc))
 			}
-	return (Just (), (notes, afterTestRef, Failure loc msg : fs))
+	let f = failure
+		{ failureLocation = loc
+		, failureMessage = msg
+		}
+	return (Just (), (notes, afterTestRef, f : fs))
 
 -- | Cause a test to immediately fail, with a message.
 --
@@ -242,20 +235,20 @@ die :: TH.Q TH.Exp
 die = do
 	loc <- TH.location
 	let qloc = liftLoc loc
-	[| \msg -> dieAt $qloc (Data.Text.pack ("die: " ++ msg)) |]
+	[| \msg -> dieAt $qloc ("die: " ++ msg) |]
 
-dieAt :: TH.Loc -> Text -> Assertions a
+dieAt :: TH.Loc -> String -> Assertions a
 dieAt loc msg = do
 	addFailure (Just loc) msg
 	Assertions (\s -> return (Nothing, s))
 
 -- | Print a message from within a test. This is just a helper for debugging,
 -- so you don't have to import @Debug.Trace@.
-trace :: Text -> Assertions ()
-trace msg = liftIO (Data.Text.IO.putStrLn msg)
+trace :: String -> Assertions ()
+trace msg = liftIO (putStrLn msg)
 
 -- | Attach metadata to a test run. This will be included in reports.
-note :: Text -> Text -> Assertions ()
+note :: String -> String -> Assertions ()
 note key value = Assertions (\(notes, afterTestRef, fs) -> do
 	modifyIORef notes ((key, value) :)
 	return (Just (), (notes, afterTestRef, fs)))
@@ -287,7 +280,7 @@ requireLeftAt loc val = case val of
 	Left a -> return a
 	Right b -> do
 		let dummy = Right b `asTypeOf` Left ()
-		dieAt loc (Data.Text.pack ("requireLeft: received " ++ showsPrec 11 dummy ""))
+		dieAt loc ("requireLeft: received " ++ showsPrec 11 dummy "")
 
 -- | Require an 'Either' value to be 'Right', and return its contents. If
 -- the value is 'Left', fail the test.
@@ -308,7 +301,7 @@ requireRightAt :: Show a => TH.Loc -> Either a b -> Assertions b
 requireRightAt loc val = case val of
 	Left a -> do
 		let dummy = Left a `asTypeOf` Right ()
-		dieAt loc (Data.Text.pack ("requireRight: received " ++ showsPrec 11 dummy ""))
+		dieAt loc ("requireRight: received " ++ showsPrec 11 dummy "")
 	Right b -> return b
 
 liftLoc :: TH.Loc -> TH.Q TH.Exp
@@ -325,8 +318,8 @@ assertAt loc fatal assertion = do
 	case result of
 		AssertionPassed -> return ()
 		AssertionFailed err -> if fatal
-			then dieAt loc (Data.Text.pack err)
-			else addFailure (Just loc) (Data.Text.pack err)
+			then dieAt loc err
+			else addFailure (Just loc) err
 
 -- | Run an 'Assertion'. If the assertion fails, the test will immediately
 -- fail.
