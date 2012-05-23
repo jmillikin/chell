@@ -64,7 +64,7 @@ $(defineOptions "MainOptions" $ do
 	)
 
 -- | A simple default main function, which runs a list of tests and logs
--- statistics to stderr.
+-- statistics to stdout.
 defaultMain :: [Suite] -> IO ()
 defaultMain suites = runCommand $ \opts args -> do
 	-- validate/sanitize test options
