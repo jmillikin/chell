@@ -2,33 +2,28 @@ module Test.Chell.HUnit
 	( hunit
 	) where
 
-import           Data.Text (Text, pack)
-
 import qualified Test.Chell as Chell
 import           Test.HUnit.Lang (Assertion, performTestCase)
 
 -- | Convert a sequence of HUnit assertions (embedded in IO) to a Chell
--- 'Chell.Suite'.
+-- 'Chell.Test'.
 --
 -- @
--- import Test.Chell
--- import Test.Chell.HUnit
--- import Test.HUnit
+--import Test.Chell
+--import Test.Chell.HUnit
+--import Test.HUnit
 --
--- tests :: [Suite]
--- tests =
---     [ suite \"foo\"
---         [ hunit \"bar\" $ do
---             1 + 2 \@?= 3
---         ]
---     ]
+--test_Addition :: Test
+--test_addition = hunit \"addition\" $ do
+--    1 + 2 \@?= 3
+--    2 + 3 \@?= 5
 -- @
-hunit :: Text -> Assertion -> Chell.Suite
-hunit name io = Chell.test (Chell.Test name chell_io) where
+hunit :: String -> Assertion -> Chell.Test
+hunit name io = Chell.test name chell_io where
 	chell_io _ = do
 		result <- performTestCase io
 		return $ case result of
 			Nothing -> Chell.TestPassed []
 			Just err -> parseError err
-	parseError (True, msg) = Chell.TestFailed [] [Chell.Failure Nothing (pack msg)]
-	parseError (False, msg) = Chell.TestAborted [] (pack msg)
+	parseError (True, msg) = Chell.TestFailed [] [Chell.failure { Chell.failureMessage = msg }]
+	parseError (False, msg) = Chell.TestAborted [] msg
