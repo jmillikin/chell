@@ -73,7 +73,7 @@ library
     , random >= 1.0
     , system-filepath >= 0.4 && < 0.5
     , template-haskell >= 2.3
-    , text >= 0.7
+    , text
     , transformers >= 0.2
 
   if flag(color-output)
