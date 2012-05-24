@@ -23,8 +23,8 @@ description:
   .
   import Test.Chell
   .
-  test_Math :: Suite
-  test_Math = suite \"math\"
+  tests_Math :: Suite
+  tests_Math = suite \"math\"
   &#x20;   test_Addition
   &#x20;   test_Subtraction
   .
@@ -39,7 +39,7 @@ description:
   &#x20;   $expect (equal (1 - 2) (-1))
   .
   main :: IO ()
-  main = defaultMain [test_Math]
+  main = defaultMain [tests_Math]
   @
   .
   @

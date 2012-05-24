@@ -147,10 +147,12 @@ printFailures :: [Failure] -> IO ()
 printFailures fs = forM_ fs $ \f -> do
 	putStr "  "
 	case failureLocation f of
-		Just loc' -> do
-			putStr (locationFile loc')
+		Just loc -> do
+			putStr (locationFile loc)
 			putStr ":"
-			putStrLn (show (locationLine loc'))
+			case locationLine loc of
+				Just line -> putStrLn (show line)
+				Nothing -> putStrLn ""
 		Nothing -> return ()
 	putStr "  "
 	putStr (failureMessage f)

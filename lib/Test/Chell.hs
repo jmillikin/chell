@@ -2,6 +2,39 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
+-- | Chell is a simple and intuitive library for automated testing. It natively
+-- supports assertion-based testing, and can use companion libraries
+-- such as @chell-quickcheck@ to support more complex testing strategies.
+--
+-- An example test suite, which verifies the behavior of artithmetic operators.
+--
+-- @
+--{-\# LANGUAGE TemplateHaskell \#-}
+--
+--import Test.Chell
+--
+--tests_Math :: Suite
+--tests_Math = 'suite' \"math\"
+--    test_Addition
+--    test_Subtraction
+--
+--test_Addition :: Test
+--test_Addition = 'assertions' \"addition\" $ do
+--    $'expect' ('equal' (2 + 1) 3)
+--    $'expect' ('equal' (1 + 2) 3)
+--
+--test_Subtraction :: Test
+--test_Subtraction = 'assertions' \"subtraction\" $ do
+--    $'expect' ('equal' (2 - 1) 1)
+--    $'expect' ('equal' (1 - 2) (-1))
+--
+--main :: IO ()
+--main = 'defaultMain' [tests_Math]
+-- @
+--
+-- >$ ghc --make chell-example.hs
+-- >$ ./chell-example
+-- >PASS: 2 tests run, 2 tests passed
 module Test.Chell
 	(
 	
@@ -26,6 +59,9 @@ module Test.Chell
 	, Assertions
 	, assertions
 	, IsAssertion
+	, Assertion
+	, assertionPassed
+	, assertionFailed
 	, assert
 	, expect
 	, die
@@ -54,27 +90,33 @@ module Test.Chell
 	, IsText
 	, equalLines
 	
-	-- ** Custom Assertions
-	, Assertion
-	, assertionPassed
-	, assertionFailed
-	
-	-- * Constructing tests
+	-- * Custom test types
 	, Test
 	, test
 	, testName
 	, runTest
+	
+	-- ** Test results
+	, TestResult (..)
+	
+	-- *** Failures
+	, Failure
+	, failure
+	, failureLocation
+	, failureMessage
+	
+	-- *** Failure locations
+	, Location
+	, location
+	, locationFile
+	, locationModule
+	, locationLine
 	
 	-- ** Test options
 	, TestOptions
 	, defaultTestOptions
 	, testOptionSeed
 	, testOptionTimeout
-	
-	-- ** Test results
-	, TestResult (..)
-	, Failure (..)
-	, Location (..)
 	) where
 
 import qualified Control.Applicative
@@ -98,48 +140,22 @@ import qualified Language.Haskell.TH as TH
 import           Test.Chell.Main (defaultMain)
 import           Test.Chell.Types
 
--- | Conditionally skip tests. Use this to avoid commenting out tests
--- which are currently broken, or do not work on the current platform.
---
--- @
---tests = 'suite' \"tests\"
---    test_Foo
---    ('skipIf' builtOnUnix test_WindowsSpecific)
---    test_Bar
--- @
---
-skipIf :: SuiteOrTest a => Bool -> a -> a
-skipIf = skipIf_
-
--- | Conditionally skip tests, depending on the result of a runtime check. The
--- predicate is checked before each test is started.
---
--- @
---tests = 'suite' \"tests\"
---    test_Foo
---    ('skipWhen' noNetwork test_PingGoogle)
---    test_Bar
--- @
-skipWhen :: SuiteOrTest a => IO Bool -> a -> a
-skipWhen = skipWhen_
-
--- $doc-basic-testing
---
--- This library includes a few basic JUnit-style assertions, for use in
--- simple test suites where depending on a separate test framework is too
--- much trouble.
-
+-- | A single pass/fail assertion. Failed assertions include an explanatory
+-- message.
 data Assertion
 	= AssertionPassed
 	| AssertionFailed String
 	deriving (Eq, Show)
 
+-- | See 'Assertion'.
 assertionPassed :: Assertion
 assertionPassed = AssertionPassed
 
+-- | See 'Assertion'.
 assertionFailed :: String -> Assertion
 assertionFailed = AssertionFailed
 
+-- | See 'assert' and 'expect'.
 class IsAssertion a where
 	runAssertion :: a -> IO Assertion
 
@@ -155,6 +171,8 @@ instance IsAssertion a => IsAssertion (IO a) where
 	runAssertion x = x >>= runAssertion
 
 type TestState = (IORef [(String, String)], IORef [IO ()], [Failure])
+
+-- | See 'assertions'.
 newtype Assertions a = Assertions { unAssertions :: TestState -> IO (Maybe a, TestState) }
 
 instance Functor Assertions where
@@ -218,7 +236,7 @@ addFailure maybe_loc msg = Assertions $ \(notes, afterTestRef, fs) -> do
 		return $ location
 			{ locationFile = TH.loc_filename th_loc
 			, locationModule = TH.loc_module th_loc
-			, locationLine = toInteger (fst (TH.loc_start th_loc))
+			, locationLine = Just (toInteger (fst (TH.loc_start th_loc)))
 			}
 	let f = failure
 		{ failureLocation = loc
@@ -246,7 +264,8 @@ dieAt loc msg = do
 	Assertions (\s -> return (Nothing, s))
 
 -- | Print a message from within a test. This is just a helper for debugging,
--- so you don't have to import @Debug.Trace@.
+-- so you don't have to import @Debug.Trace@. Messages will be prefixed with
+-- the filename and line number where @$trace@ was called.
 --
 -- 'trace' is a Template Haskell macro, to retain the source-file location
 -- from which it was used. Its effective type is:
@@ -267,14 +286,16 @@ traceAt loc msg = liftIO $ do
 	putStr ("[" ++ file ++ ":" ++ show line ++ "] ")
 	putStrLn msg
 
--- | Attach metadata to a test run. This will be included in reports.
+-- | Attach a note to a test run. Notes will be printed to stdout and
+-- included in reports, even if the test fails or aborts. Notes are useful for
+-- debugging failing tests.
 note :: String -> String -> Assertions ()
 note key value = Assertions (\(notes, afterTestRef, fs) -> do
 	modifyIORef notes ((key, value) :)
 	return (Just (), (notes, afterTestRef, fs)))
 
 -- | Register an IO action to be run after the test completes. This action
--- will run even if the test failed or threw an exception.
+-- will run even if the test failed or aborted.
 afterTest :: IO () -> Assertions ()
 afterTest io = Assertions (\(notes, ref, fs) -> do
 	modifyIORef ref (io :)
@@ -341,8 +362,11 @@ assertAt loc fatal assertion = do
 			then dieAt loc err
 			else addFailure (Just loc) err
 
--- | Run an 'Assertion'. If the assertion fails, the test will immediately
+-- | Check an assertion. If the assertion fails, the test will immediately
 -- fail.
+--
+-- The assertion to check can be a boolean value, an 'Assertion', or an IO
+-- action returning one of the above.
 --
 -- 'assert' is a Template Haskell macro, to retain the source-file location
 -- from which it was used. Its effective type is:
@@ -350,14 +374,17 @@ assertAt loc fatal assertion = do
 -- @
 -- $assert :: 'IsAssertion' assertion => assertion -> 'Assertions' ()
 -- @
-assert :: TH.Q TH.Exp -- :: IsAssertion assertion => assertion -> Assertions ()
+assert :: TH.Q TH.Exp
 assert = do
 	loc <- TH.location
 	let qloc = liftLoc loc
 	[| assertAt $qloc True |]
 
--- | Run an 'Assertion'. If the assertion fails, the test will continue to
--- run until it finishes (or until an 'assert' fails).
+-- | Check an assertion. If the assertion fails, the test will continue to
+-- run until it finishes, a call to 'assert' fails, or the test runs 'die'.
+--
+-- The assertion to check can be a boolean value, an 'Assertion', or an IO
+-- action returning one of the above.
 --
 -- 'expect' is a Template Haskell macro, to retain the source-file location
 -- from which it was used. Its effective type is:
@@ -365,7 +392,7 @@ assert = do
 -- @
 -- $expect :: 'IsAssertion' assertion => assertion -> 'Assertions' ()
 -- @
-expect :: TH.Q TH.Exp -- :: IsAssertion assertion => assertion -> Assertions ()
+expect :: TH.Q TH.Exp
 expect = do
 	loc <- TH.location
 	let qloc = liftLoc loc
@@ -396,8 +423,8 @@ just :: Maybe a -> Assertion
 just x = pure (isJust x) ("just: received Nothing")
 
 -- | Assert that some value is @Nothing@.
-nothing :: Maybe a -> Assertion
-nothing x = pure (isNothing x) ("nothing: received Just")
+nothing :: Show a => Maybe a -> Assertion
+nothing x = pure (isNothing x) ("nothing: received " ++ showsPrec 11 x "")
 
 -- | Assert that some value is @Left@.
 left :: Show b => Either a b -> Assertion
@@ -482,7 +509,7 @@ equalDiff' label norm x y = checkDiff (items x) (items y) where
 	
 	errorMsg diff = label ++ ": items differ\n" ++ diff
 
--- | Class for types which can be treated as text.
+-- | Class for types which can be treated as text; see 'equalLines'.
 class IsText a where
 	toLines :: a -> [a]
 	unpack :: a -> String

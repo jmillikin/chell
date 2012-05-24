@@ -170,13 +170,16 @@ jsonReport results = Writer.execWriter writer where
 				tell (escapeJSON (failureMessage f))
 				tell "\""
 				case failureLocation f of
-					Just loc' -> do
+					Just loc -> do
 						tell ", \"location\": {\"module\": \""
-						tell (escapeJSON (locationModule loc'))
+						tell (escapeJSON (locationModule loc))
 						tell "\", \"file\": \""
-						tell (escapeJSON (locationFile loc'))
-						tell "\", \"line\": "
-						tell (show (locationLine loc'))
+						tell (escapeJSON (locationFile loc))
+						case locationLine loc of
+							Just line -> do
+								tell "\", \"line\": "
+								tell (show line)
+							Nothing -> tell "\""
 						tell "}"
 					Nothing -> return ()
 				tell "}"
@@ -248,14 +251,17 @@ xmlReport results = Writer.execWriter writer where
 				tell "\t\t<failure message='"
 				tell (escapeXML (failureMessage f))
 				case failureLocation f of
-					Just loc' -> do
+					Just loc -> do
 						tell "'>\n"
 						tell "\t\t\t<location module='"
-						tell (escapeXML (locationModule loc'))
+						tell (escapeXML (locationModule loc))
 						tell "' file='"
-						tell (escapeXML (locationFile loc'))
-						tell "' line='"
-						tell (show (locationLine loc'))
+						tell (escapeXML (locationFile loc))
+						case locationLine loc of
+							Just line -> do
+								tell "' line='"
+								tell (show line)
+							Nothing -> return ()
 						tell "'/>\n"
 						tell "\t\t</failure>\n"
 					Nothing -> tell "'/>\n"
@@ -322,10 +328,13 @@ textReport results = Writer.execWriter writer where
 			tell "\n"
 			forM_ fs $ \f -> do
 				case failureLocation f of
-					Just loc' -> do
-						tell (locationFile loc')
-						tell ":"
-						tell (show (locationLine loc'))
+					Just loc -> do
+						tell (locationFile loc)
+						case locationLine loc of
+							Just line -> do
+								tell ":"
+								tell (show line)
+							Nothing -> return ()
 						tell "\n"
 					Nothing -> return ()
 				tell (failureMessage f)
