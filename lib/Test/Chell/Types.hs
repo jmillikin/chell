@@ -247,6 +247,7 @@ skipWhenSOT p (SOT_Test t) = SOT_Test (skipWhen_ p t)
 -- which are currently broken, or do not work on the current platform.
 --
 -- @
+--tests :: Suite
 --tests = 'suite' \"tests\"
 --    test_Foo
 --    ('skipIf' builtOnUnix test_WindowsSpecific)
@@ -260,6 +261,7 @@ skipIf = skipIf_
 -- predicate is checked before each test is started.
 --
 -- @
+--tests :: Suite
 --tests = 'suite' \"tests\"
 --    test_Foo
 --    ('skipWhen' noNetwork test_PingGoogle)
