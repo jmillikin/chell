@@ -89,6 +89,7 @@ module Test.Chell
 	, equalItems
 	, IsText
 	, equalLines
+	, equalLinesWith
 	
 	-- * Custom test types
 	, Test
@@ -540,8 +541,16 @@ instance IsText Data.ByteString.Lazy.Char8.ByteString where
 -- to check line-by-line, so the error message will be easier to read on
 -- large inputs.
 equalLines :: (Ord a, IsText a) => a -> a -> Assertion
-equalLines x y = checkDiff (toLines x) (toLines y) where
-	checkDiff xs ys = case checkItems (Patience.diff xs ys) of
+equalLines x y = checkLinesDiff "equalLines" (toLines x) (toLines y)
+
+-- | Variant of 'equalLines' which allows a user-specified line-splitting
+-- predicate.
+equalLinesWith :: Ord a => (a -> [String]) -> a -> a -> Assertion
+equalLinesWith toStringLines x y = checkLinesDiff "equalLinesWith" (toStringLines x) (toStringLines y)
+
+checkLinesDiff :: (Ord a, IsText a) => String -> [a] -> [a] -> Assertion
+checkLinesDiff label = go where
+	go xs ys = case checkItems (Patience.diff xs ys) of
 		(same, diff) -> pure same diff
 	
 	checkItems diffItems = case foldl' checkItem (True, []) diffItems of
@@ -552,4 +561,4 @@ equalLines x y = checkDiff (toLines x) (toLines y) where
 		Patience.New t -> (False, ("\t+ " ++ unpack t) : acc)
 		Patience.Both t _-> (same, ("\t  " ++ unpack t) : acc)
 	
-	errorMsg diff = "equalLines: lines differ\n" ++ diff
+	errorMsg diff = label ++ ": lines differ\n" ++ diff
