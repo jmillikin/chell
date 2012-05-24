@@ -9,10 +9,6 @@ module Test.Chell.Types
 	, testOptionTimeout
 	
 	, TestResult(TestPassed, TestSkipped, TestFailed, TestAborted)
-	, testPassed
-	, testSkipped
-	, testFailed
-	, testAborted
 	
 	, Failure
 	, failure
@@ -127,21 +123,6 @@ data TestResult
 	-- provide a default case.
 	| TestResultCaseMustHaveDefault
 	deriving (Show, Eq)
-
--- TODO: notes
-
--- | TODO
-testPassed :: TestResult
-testPassed = TestPassed []
-
-testSkipped :: TestResult
-testSkipped = TestSkipped
-
-testFailed :: [Failure] -> TestResult
-testFailed = TestFailed []
-
-testAborted :: String -> TestResult
-testAborted = TestAborted []
 
 -- | Contains details about a test failure.
 data Failure = Failure
