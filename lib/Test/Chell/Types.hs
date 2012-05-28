@@ -274,6 +274,22 @@ instance (SuiteOrTest t, BuildSuite s) => BuildSuite (t -> s) where
 --    tests_Math
 --    test_Show
 -- @
+--
+-- Compatibility note: in GHC 7.0 and earlier, a maximum of 20 parameters may
+-- be passed to variadic functions. Suites containing more than 20 children
+-- may cause a compilation error that looks like:
+--
+-- >Context reduction stack overflow; size = 21
+-- >Use -fcontext-stack=N to increase stack size to N
+-- >  $dBuildSuite :: BuildSuite (Suite -> Test -> Test -> Suite)
+--
+-- There are three potential solutions:
+--
+-- 1. If possible, upgrade to a more recent version of GHC.
+--
+-- 2. Set the GHC flag @-fcontext-stack@ to a larger number.
+--
+-- 3. Re-organize your tests such that no suite has more than 20 children.
 suite :: BuildSuite a => String -> a
 suite name = addChildren (Suite name [])
 
