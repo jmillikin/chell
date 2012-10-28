@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Test.Chell.QuickCheck
 	( property
 	) where
@@ -32,7 +34,8 @@ property name prop = Chell.test name $ \opts -> do
 	let state = State.MkState
 		{ State.terminal = term
 		, State.maxSuccessTests = QuickCheck.maxSuccess args
-		, State.maxDiscardedTests = QuickCheck.maxDiscard args
+		, State.maxDiscardedTests = maxDiscardedTests args prop
+
 		, State.computeSize = computeSize (QuickCheck.maxSize args) (QuickCheck.maxSuccess args)
 		, State.numSuccessTests = 0
 		, State.numDiscardedTests = 0
@@ -41,6 +44,12 @@ property name prop = Chell.test name $ \opts -> do
 		, State.randomSeed = mkStdGen seed
 		, State.numSuccessShrinks = 0
 		, State.numTryShrinks = 0
+#if MIN_VERSION_QuickCheck(2,5,0)
+		, State.numTotTryShrinks = 0
+#endif
+#if MIN_VERSION_QuickCheck(2,5,1)
+		, State.numRecentlyDiscardedTests = 0
+#endif
 		}
 	
 	result <- Test.test state (Gen.unGen (QuickCheck.property prop))
@@ -66,3 +75,12 @@ computeSize maxSize maxSuccess n d
 
 roundTo :: Int -> Int -> Int
 roundTo n m = (n `div` m) * m
+
+maxDiscardedTests :: QuickCheck.Testable prop => QuickCheck.Args -> prop -> Int
+#if MIN_VERSION_QuickCheck(2,5,0)
+maxDiscardedTests args p = if QuickCheck.exhaustive p
+	then QuickCheck.maxDiscardRatio args
+	else QuickCheck.maxDiscardRatio args * QuickCheck.maxSuccess args
+#else
+maxDiscardedTests args _ = QuickCheck.maxDiscard args
+#endif
