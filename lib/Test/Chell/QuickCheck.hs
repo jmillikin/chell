@@ -25,10 +25,15 @@ import qualified Test.QuickCheck.Text as Text
 --    (\xs -> not (null xs) ==> length xs > 0)
 -- @
 property :: QuickCheck.Testable prop => String -> prop -> Chell.Test
+#if MIN_VERSION_QuickCheck(2,6,0)
+property name prop = Chell.test name $ \opts ->
+	Text.withNullTerminal $ \term -> do
+#else
 property name prop = Chell.test name $ \opts -> do
-	let seed = Chell.testOptionSeed opts
-	
 	term <- Text.newNullTerminal
+#endif
+	
+	let seed = Chell.testOptionSeed opts
 	
 	let args = QuickCheck.stdArgs
 	let state = State.MkState
