@@ -15,7 +15,6 @@ import           System.IO (hPutStr, hPutStrLn, hIsTerminalDevice, stderr, stdou
 import           System.Random (randomIO)
 import           Text.Printf (printf)
 
-import qualified Filesystem.Path.CurrentOS as Path
 import           Options
 
 import           Test.Chell.Output
@@ -30,11 +29,11 @@ $(defineOptions "MainOptions" $ do
 		, optionDescription = "Print more output"
 		})
 	
-	pathOption "optXmlReport" "xml-report" Path.empty
+	stringOption "optXmlReport" "xml-report" ""
 		"Write a parsable report to a given path, in XML."
-	pathOption "optJsonReport" "json-report" Path.empty
+	stringOption "optJsonReport" "json-report" ""
 		"Write a parsable report to a given path, in JSON."
-	pathOption "optTextReport" "text-report" Path.empty
+	stringOption "optTextReport" "text-report" ""
 		"Write a human-readable report to a given path."
 	
 	option "optSeed" (\o -> o
@@ -132,14 +131,14 @@ type Report = [(Test, TestResult)] -> String
 getReports :: MainOptions -> [(String, String, Report)]
 getReports opts = concat [xml, json, text] where
 	xml = case optXmlReport opts of
-		p | Path.null p -> []
-		p -> [(Path.encodeString p, "XML", xmlReport)]
+		"" -> []
+		path -> [(path, "XML", xmlReport)]
 	json = case optJsonReport opts of
-		p | Path.null p -> []
-		p -> [(Path.encodeString p, "JSON", jsonReport)]
+		"" -> []
+		path -> [(path, "JSON", jsonReport)]
 	text = case optTextReport opts of
-		p | Path.null p -> []
-		p -> [(Path.encodeString p, "text", textReport)]
+		"" -> []
+		path -> [(path, "text", textReport)]
 
 jsonReport :: [(Test, TestResult)] -> String
 jsonReport results = Writer.execWriter writer where
