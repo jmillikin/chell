@@ -1,9 +1,8 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 module Test.Chell.Main
 	( defaultMain
 	) where
 
+import           Control.Applicative
 import           Control.Monad (forM, forM_, when)
 import           Control.Monad.Trans.Class (lift)
 import qualified Control.Monad.Trans.State as State
@@ -20,47 +19,55 @@ import           Options
 import           Test.Chell.Output
 import           Test.Chell.Types
 
-$(defineOptions "MainOptions" $ do
-	option "optVerbose" (\o -> o
-		{ optionShortFlags = ['v']
-		, optionLongFlags = ["verbose"]
-		, optionType = optionTypeBool
-		, optionDefault = "false"
-		, optionDescription = "Print more output"
-		})
-	
-	stringOption "optXmlReport" "xml-report" ""
-		"Write a parsable report to a given path, in XML."
-	stringOption "optJsonReport" "json-report" ""
-		"Write a parsable report to a given path, in JSON."
-	stringOption "optTextReport" "text-report" ""
-		"Write a human-readable report to a given path."
-	
-	option "optSeed" (\o -> o
-		{ optionLongFlags = ["seed"]
-		, optionType = optionTypeMaybe optionTypeInt
-		, optionDefault = ""
-		, optionDescription = "The seed used for random numbers in (for example) quickcheck."
-		})
-	
-	option "optTimeout" (\o -> o
-		{ optionLongFlags = ["timeout"]
-		, optionType = optionTypeMaybe optionTypeInt
-		, optionDefault = ""
-		, optionDescription = "The maximum duration of a test, in milliseconds."
-		})
-	
-	option "optColor" (\o -> o
-		{ optionLongFlags = ["color"]
-		, optionType = optionTypeEnum ''ColorMode
-			[ ("always", ColorModeAlways)
-			, ("never", ColorModeNever)
-			, ("auto", ColorModeAuto)
-			]
-		, optionDefault = "auto"
-		, optionDescription = "Whether to enable color ('always', 'auto', or 'never')."
-		})
-	)
+data MainOptions = MainOptions
+	{ optVerbose :: Bool
+	, optXmlReport :: String
+	, optJsonReport :: String
+	, optTextReport :: String
+	, optSeed :: Maybe Int
+	, optTimeout :: Maybe Int
+	, optColor :: ColorMode
+	}
+
+optionType_ColorMode :: OptionType ColorMode
+optionType_ColorMode = optionType "ColorMode" ColorModeAuto parseMode showMode where
+	parseMode s = case s of
+		"always" -> Right ColorModeAlways
+		"never" -> Right ColorModeNever
+		"auto" -> Right ColorModeAuto
+		_ -> Left (show s ++ " is not in {\"always\", \"never\", \"auto\"}.")
+	showMode mode = case mode of
+		ColorModeAlways -> "always"
+		ColorModeNever -> "never"
+		ColorModeAuto -> "auto"
+
+instance Options MainOptions where
+	defineOptions = pure MainOptions
+		<*> defineOption optionType_bool (\o -> o
+			{ optionShortFlags = ['v']
+			, optionLongFlags = ["verbose"]
+			, optionDefault = False
+			, optionDescription = "Print more output."
+			})
+		
+		<*> simpleOption "xml-report" ""
+		    "Write a parsable report to a given path, in XML."
+		<*> simpleOption "json-report" ""
+		    "Write a parsable report to a given path, in JSON."
+		<*> simpleOption "text-report" ""
+		    "Write a human-readable report to a given path."
+		
+		<*> simpleOption "seed" Nothing
+		    "The seed used for random numbers in (for example) quickcheck."
+		
+		<*> simpleOption "timeout" Nothing
+		    "The maximum duration of a test, in milliseconds."
+		
+		<*> defineOption optionType_ColorMode (\o -> o
+			{ optionLongFlags = ["color"]
+			, optionDefault = ColorModeAuto
+			, optionDescription = "Whether to enable color ('always', 'auto', or 'never')."
+			})
 
 -- | A simple default main function, which runs a list of tests and logs
 -- statistics to stdout.
