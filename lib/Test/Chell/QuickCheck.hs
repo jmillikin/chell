@@ -9,6 +9,10 @@ import           System.Random (mkStdGen)
 import qualified Test.Chell as Chell
 import qualified Test.QuickCheck as QuickCheck
 import qualified Test.QuickCheck.Gen as Gen
+#if MIN_VERSION_QuickCheck(2,7,0)
+import           Test.QuickCheck.Property (unProperty)
+import qualified Test.QuickCheck.Random as QCRandom
+#endif
 import qualified Test.QuickCheck.State as State
 import qualified Test.QuickCheck.Test as Test
 import qualified Test.QuickCheck.Text as Text
@@ -46,7 +50,12 @@ property name prop = Chell.test name $ \opts -> do
 		, State.numDiscardedTests = 0
 		, State.collected = []
 		, State.expectedFailure = False
+
+#if MIN_VERSION_QuickCheck(2,7,0)
+		, State.randomSeed = QCRandom.mkQCGen seed
+#else
 		, State.randomSeed = mkStdGen seed
+#endif
 		, State.numSuccessShrinks = 0
 		, State.numTryShrinks = 0
 #if MIN_VERSION_QuickCheck(2,5,0)
@@ -57,7 +66,12 @@ property name prop = Chell.test name $ \opts -> do
 #endif
 		}
 	
-	result <- Test.test state (Gen.unGen (QuickCheck.property prop))
+#if MIN_VERSION_QuickCheck(2,7,0)
+	let genProp = unProperty (QuickCheck.property prop)
+#else
+	let genProp = QuickCheck.property prop
+#endif
+	result <- Test.test state (Gen.unGen genProp)
 	let output = Test.output result
 	let notes = [("seed", show seed)]
 	let failure = Chell.failure { Chell.failureMessage = output }
