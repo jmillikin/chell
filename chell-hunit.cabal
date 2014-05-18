@@ -27,7 +27,7 @@ library
 
   build-depends:
       base >= 4.0 && < 5.0
-    , chell >= 0.3 && < 0.4
+    , chell >= 0.3 && < 0.5
     , HUnit >= 1.1 && < 1.3
 
   exposed-modules:
