@@ -26,7 +26,6 @@ module Test.Chell.Types
 	, suiteName
 	, suiteTests
 	
-	, BuildSuite
 	, SuiteOrTest
 	, skipIf
 	, skipWhen
@@ -173,42 +172,25 @@ data Location = Location
 location :: Location
 location = Location "" "" Nothing
 
--- | A suite is a node in a hierarchy of tests, similar to a directory in the
--- filesystem. Each suite has a name and a list of children, which are either
--- suites or tests.
-data Suite = Suite String [SOT]
+-- | A suite is a named collection of tests.
+--
+-- Note: earlier versions of Chell permitted arbitrary nesting of test suites.
+-- This feature proved too unwieldy, and was removed. A similar result can be
+-- achieved with 'suiteTests'; see the documentation for 'suite'.
+data Suite = Suite String [Test]
 	deriving (Show)
 
-data SOT
-	= SOT_Suite Suite
-	| SOT_Test Test
-
-instance Show SOT where
-	showsPrec d (SOT_Test t) = showsPrec d t
-	showsPrec d (SOT_Suite s) = showsPrec d s
-
--- | See 'suite'.
-class BuildSuite a where
-	addChildren :: Suite -> a
-
-instance BuildSuite Suite where
-	addChildren (Suite name cs) = Suite name (reverse cs)
-
--- | See 'suite'.
 class SuiteOrTest a where
-	toSOT :: a -> SOT
 	skipIf_ :: Bool -> a -> a
 	skipWhen_ :: IO Bool -> a -> a
 
 instance SuiteOrTest Suite where
-	toSOT = SOT_Suite
 	skipIf_ skip s@(Suite name children) = if skip
-		then Suite name (map skipSOT children)
+		then Suite name (map (skipIf_ skip) children)
 		else s
-	skipWhen_ p (Suite name children) = Suite name (map (skipWhenSOT p) children)
+	skipWhen_ p (Suite name children) = Suite name (map (skipWhen_ p) children)
 
 instance SuiteOrTest Test where
-	toSOT = SOT_Test
 	skipIf_ skip t@(Test name _) = if skip
 		then Test name (\_ -> return TestSkipped)
 		else t
@@ -216,23 +198,16 @@ instance SuiteOrTest Test where
 		skip <- p
 		if skip then return TestSkipped else io opts)
 
-skipSOT :: SOT -> SOT
-skipSOT (SOT_Test (Test name _)) = SOT_Test (Test name (\_ -> return TestSkipped))
-skipSOT (SOT_Suite (Suite name cs)) = SOT_Suite (Suite name (map skipSOT cs))
-
-skipWhenSOT :: IO Bool -> SOT -> SOT
-skipWhenSOT p (SOT_Suite s) = SOT_Suite (skipWhen_ p s)
-skipWhenSOT p (SOT_Test t) = SOT_Test (skipWhen_ p t)
-
 -- | Conditionally skip tests. Use this to avoid commenting out tests
 -- which are currently broken, or do not work on the current platform.
 --
 -- @
 --tests :: Suite
 --tests = 'suite' \"tests\"
---    test_Foo
---    ('skipIf' builtOnUnix test_WindowsSpecific)
---    test_Bar
+--    [ test_Foo
+--    , 'skipIf' builtOnUnix test_WindowsSpecific
+--    , test_Bar
+--    ]
 -- @
 --
 skipIf :: SuiteOrTest a => Bool -> a -> a
@@ -244,54 +219,41 @@ skipIf = skipIf_
 -- @
 --tests :: Suite
 --tests = 'suite' \"tests\"
---    test_Foo
---    ('skipWhen' noNetwork test_PingGoogle)
---    test_Bar
+--    [ test_Foo
+--    , 'skipWhen' noNetwork test_PingGoogle
+--    , test_Bar
+--    ]
 -- @
 skipWhen :: SuiteOrTest a => IO Bool -> a -> a
 skipWhen = skipWhen_
 
-instance (SuiteOrTest t, BuildSuite s) => BuildSuite (t -> s) where
-	addChildren (Suite name cs) = \b -> addChildren (Suite name (toSOT b : cs))
-
 -- | Define a new 'Suite', with the given name and children.
 --
--- The type of this function allows any number of children to be added,
--- without requiring them to be homogenous types.
+-- Note: earlier versions of Chell permitted arbitrary nesting of test suites.
+-- This feature proved too unwieldy, and was removed. A similar result can be
+-- achieved with 'suiteTests':
 --
 -- @
 --test_Addition :: Test
 --test_Subtraction :: Test
 --test_Show :: Test
 --
---tests_Math :: Suite
---tests_Math = 'suite' \"math\"
---    test_Addition
---    test_Subtraction
+--suite_Math :: Suite
+--suite_Math = 'suite' \"math\"
+--    [ test_Addition
+--    , test_Subtraction
+--    ]
 --
---tests_Prelude :: Suite
---tests_Prelude = 'suite' \"prelude\"
---    tests_Math
---    test_Show
+--suite_Prelude :: Suite
+--suite_Prelude = 'suite' \"prelude\"
+--    (
+--      [ test_Show
+--      ]
+--      ++ suiteTests suite_Math
+--    )
 -- @
---
--- Compatibility note: in GHC 7.0 and earlier, a maximum of 20 parameters may
--- be passed to variadic functions. Suites containing more than 20 children
--- may cause a compilation error that looks like:
---
--- >Context reduction stack overflow; size = 21
--- >Use -fcontext-stack=N to increase stack size to N
--- >  $dBuildSuite :: BuildSuite (Suite -> Test -> Test -> Suite)
---
--- There are three potential solutions:
---
--- 1. If possible, upgrade to a more recent version of GHC.
---
--- 2. Set the GHC flag @-fcontext-stack@ to a larger number.
---
--- 3. Re-organize your tests such that no suite has more than 20 children.
-suite :: BuildSuite a => String -> a
-suite name = addChildren (Suite name [])
+suite :: String -> [Test] -> Suite
+suite = Suite
 
 -- | Get a suite's name. Suite names may be any string, but are typically
 -- plain ASCII so users can easily type them on the command line.
@@ -321,8 +283,7 @@ suiteTests = go "" where
 	
 	go prefix (Suite name children) = concatMap (step (prefixed prefix name)) children
 	
-	step prefix (SOT_Suite s) = go prefix s
-	step prefix (SOT_Test (Test name io)) = [Test (prefixed prefix name) io]
+	step prefix (Test name io) = [Test (prefixed prefix name) io]
 
 -- | Run a test, wrapped in error handlers. This will return 'TestAborted' if
 -- the test throws an exception or times out.

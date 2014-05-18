@@ -1,5 +1,5 @@
 name: chell
-version: 0.3.3
+version: 0.4
 license: MIT
 license-file: license.txt
 author: John Millikin <jmillikin@gmail.com>
@@ -25,8 +25,9 @@ description:
   .
   tests_Math :: Suite
   tests_Math = suite \"math\"
-  &#x20;   test_Addition
-  &#x20;   test_Subtraction
+  &#x20;   [ test_Addition
+  &#x20;   , test_Subtraction
+  &#x20;   ]
   .
   test_Addition :: Test
   test_Addition = assertions \"addition\" $ do
@@ -55,7 +56,7 @@ source-repository head
 source-repository this
   type: git
   location: https://john-millikin.com/code/chell/
-  tag: chell_0.3.3
+  tag: chell_0.4
 
 flag color-output
   description: Enable colored output in test results

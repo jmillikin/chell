@@ -13,10 +13,11 @@
 --
 --import Test.Chell
 --
---tests_Math :: Suite
---tests_Math = 'suite' \"math\"
---    test_Addition
---    test_Subtraction
+--suite_Math :: Suite
+--suite_Math = 'suite' \"math\"
+--    [ test_Addition
+--    , test_Subtraction
+--    ]
 --
 --test_Addition :: Test
 --test_Addition = 'assertions' \"addition\" $ do
@@ -29,7 +30,7 @@
 --    $'expect' ('equal' (1 - 2) (-1))
 --
 --main :: IO ()
---main = 'defaultMain' [tests_Math]
+--main = 'defaultMain' [suite_Math]
 -- @
 --
 -- >$ ghc --make chell-example.hs
@@ -43,15 +44,12 @@ module Test.Chell
 	
 	-- * Test suites
 	, Suite
+	, suite
 	, suiteName
 	, suiteTests
 	
-	-- ** Building test suites
-	, BuildSuite
-	, SuiteOrTest
-	, suite
-	
 	-- ** Skipping some tests
+	, SuiteOrTest
 	, skipIf
 	, skipWhen
 	
