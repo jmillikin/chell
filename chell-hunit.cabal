@@ -1,5 +1,5 @@
 name: chell-hunit
-version: 0.2
+version: 0.2.1
 license: MIT
 license-file: license.txt
 author: John Millikin <john@john-millikin.com>
@@ -19,7 +19,7 @@ source-repository head
 source-repository this
   type: git
   location: https://john-millikin.com/code/chell-hunit/
-  tag: chell-hunit_0.2
+  tag: chell-hunit_0.2.1
 
 library
   hs-source-dirs: lib
