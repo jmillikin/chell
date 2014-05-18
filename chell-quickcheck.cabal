@@ -27,7 +27,7 @@ library
 
   build-depends:
       base >= 4.0 && < 5.0
-    , chell >= 0.3 && < 0.4
+    , chell >= 0.3 && < 0.5
     , QuickCheck >= 2.3 && < 2.8
     , random
 
