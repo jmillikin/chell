@@ -397,33 +397,33 @@ expect = do
 	let qloc = liftLoc loc
 	[| assertAt $qloc False |]
 
-pure :: Bool -> String -> Assertion
-pure True  _   = assertionPassed
-pure False err = AssertionFailed err
+assertBool :: Bool -> String -> Assertion
+assertBool True  _   = assertionPassed
+assertBool False err = AssertionFailed err
 
 -- | Assert that two values are equal.
 equal :: (Show a, Eq a) => a -> a -> Assertion
-equal x y = pure (x == y) ("equal: " ++ show x ++ " is not equal to " ++ show y)
+equal x y = assertBool (x == y) ("equal: " ++ show x ++ " is not equal to " ++ show y)
 
 -- | Assert that two values are not equal.
 notEqual :: (Eq a, Show a) => a -> a -> Assertion
-notEqual x y = pure (x /= y) ("notEqual: " ++ show x ++ " is equal to " ++ show y)
+notEqual x y = assertBool (x /= y) ("notEqual: " ++ show x ++ " is equal to " ++ show y)
 
 -- | Assert that two values are within some delta of each other.
 equalWithin :: (Real a, Show a) => a -> a
                                 -> a -- ^ delta
                                 -> Assertion
-equalWithin x y delta = pure
+equalWithin x y delta = assertBool 
 	((x - delta <= y) && (x + delta >= y))
 	("equalWithin: " ++ show x ++ " is not within " ++ show delta ++ " of " ++ show y)
 
 -- | Assert that some value is @Just@.
 just :: Maybe a -> Assertion
-just x = pure (isJust x) ("just: received Nothing")
+just x = assertBool (isJust x) ("just: received Nothing")
 
 -- | Assert that some value is @Nothing@.
 nothing :: Show a => Maybe a -> Assertion
-nothing x = pure (isNothing x) ("nothing: received " ++ showsPrec 11 x "")
+nothing x = assertBool (isNothing x) ("nothing: received " ++ showsPrec 11 x "")
 
 -- | Assert that some value is @Left@.
 left :: Show b => Either a b -> Assertion
@@ -464,19 +464,19 @@ throwsEq expected io = do
 
 -- | Assert a value is greater than another.
 greater :: (Ord a, Show a) => a -> a -> Assertion
-greater x y = pure (x > y) ("greater: " ++ show x ++ " is not greater than " ++ show y)
+greater x y = assertBool (x > y) ("greater: " ++ show x ++ " is not greater than " ++ show y)
 
 -- | Assert a value is greater than or equal to another.
 greaterEqual :: (Ord a, Show a) => a -> a -> Assertion
-greaterEqual x y = pure (x >= y) ("greaterEqual: " ++ show x ++ " is not greater than or equal to " ++ show y)
+greaterEqual x y = assertBool (x >= y) ("greaterEqual: " ++ show x ++ " is not greater than or equal to " ++ show y)
 
 -- | Assert a value is less than another.
 lesser :: (Ord a, Show a) => a -> a -> Assertion
-lesser x y = pure (x < y) ("lesser: " ++ show x ++ " is not less than " ++ show y)
+lesser x y = assertBool (x < y) ("lesser: " ++ show x ++ " is not less than " ++ show y)
 
 -- | Assert a value is less than or equal to another.
 lesserEqual :: (Ord a, Show a) => a -> a -> Assertion
-lesserEqual x y = pure (x <= y) ("lesserEqual: " ++ show x ++ " is not less than or equal to " ++ show y)
+lesserEqual x y = assertBool (x <= y) ("lesserEqual: " ++ show x ++ " is not less than or equal to " ++ show y)
 
 -- | Assert that two containers have the same items, in any order.
 sameItems :: (Foldable container, Show item, Ord item) => container item -> container item -> Assertion
@@ -496,7 +496,7 @@ equalDiff' :: (Foldable container, Show item, Ord item)
 equalDiff' label norm x y = checkDiff (items x) (items y) where
 	items = norm . foldMap (:[])
 	checkDiff xs ys = case checkItems (Patience.diff xs ys) of
-		(same, diff) -> pure same diff
+		(same, diff) -> assertBool same diff
 	
 	checkItems diffItems = case foldl' checkItem (True, []) diffItems of
 		(same, diff) -> (same, errorMsg (intercalate "\n" (reverse diff)))
@@ -549,7 +549,7 @@ equalLinesWith toStringLines x y = checkLinesDiff "equalLinesWith" (toStringLine
 checkLinesDiff :: (Ord a, IsText a) => String -> [a] -> [a] -> Assertion
 checkLinesDiff label = go where
 	go xs ys = case checkItems (Patience.diff xs ys) of
-		(same, diff) -> pure same diff
+		(same, diff) -> assertBool same diff
 	
 	checkItems diffItems = case foldl' checkItem (True, []) diffItems of
 		(same, diff) -> (same, errorMsg (intercalate "\n" (reverse diff)))

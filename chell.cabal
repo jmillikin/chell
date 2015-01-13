@@ -1,5 +1,5 @@
 name: chell
-version: 0.4
+version: 0.4.0.1
 license: MIT
 license-file: license.txt
 author: John Millikin <john@john-millikin.com>
@@ -56,7 +56,7 @@ source-repository head
 source-repository this
   type: git
   location: https://john-millikin.com/code/chell/
-  tag: chell_0.4
+  tag: chell_0.4.0.1
 
 flag color-output
   description: Enable colored output in test results
