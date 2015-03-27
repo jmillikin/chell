@@ -4,6 +4,7 @@ module Test.Chell.QuickCheck
 	( property
 	) where
 
+import           Data.Monoid (mempty)
 import           System.Random (mkStdGen)
 
 import qualified Test.Chell as Chell
@@ -63,6 +64,9 @@ property name prop = Chell.test name $ \opts -> do
 #endif
 #if MIN_VERSION_QuickCheck(2,5,1)
 		, State.numRecentlyDiscardedTests = 0
+#endif
+#if MIN_VERSION_QuickCheck(2,8,0)
+		, State.labels = mempty
 #endif
 		}
 	
