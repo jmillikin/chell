@@ -44,7 +44,11 @@ property name prop = Chell.test name $ \opts -> do
 	let state = State.MkState
 		{ State.terminal = term
 		, State.maxSuccessTests = QuickCheck.maxSuccess args
+#if MIN_VERSION_QuickCheck(2,10,1)
+		, State.maxDiscardedRatio = QuickCheck.maxDiscardRatio args
+#else
 		, State.maxDiscardedTests = maxDiscardedTests args prop
+#endif
 
 		, State.computeSize = computeSize (QuickCheck.maxSize args) (QuickCheck.maxSuccess args)
 		, State.numSuccessTests = 0
@@ -67,6 +71,9 @@ property name prop = Chell.test name $ \opts -> do
 #endif
 #if MIN_VERSION_QuickCheck(2,8,0)
 		, State.labels = mempty
+#endif
+#if MIN_VERSION_QuickCheck(2,10,0)
+		, State.numTotMaxShrinks = QuickCheck.maxShrinks args
 #endif
 		}
 	
@@ -100,7 +107,9 @@ roundTo :: Int -> Int -> Int
 roundTo n m = (n `div` m) * m
 
 maxDiscardedTests :: QuickCheck.Testable prop => QuickCheck.Args -> prop -> Int
-#if MIN_VERSION_QuickCheck(2,5,0)
+#if MIN_VERSION_QuickCheck(2,9,0)
+maxDiscardedTests args _ = QuickCheck.maxDiscardRatio args
+#elif MIN_VERSION_QuickCheck(2,5,0)
 maxDiscardedTests args p = if QuickCheck.exhaustive p
 	then QuickCheck.maxDiscardRatio args
 	else QuickCheck.maxDiscardRatio args * QuickCheck.maxSuccess args

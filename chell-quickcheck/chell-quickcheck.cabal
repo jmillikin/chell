@@ -1,5 +1,5 @@
 name: chell-quickcheck
-version: 0.2.5
+version: 0.2.5.1
 license: MIT
 license-file: license.txt
 author: John Millikin <john@john-millikin.com>
@@ -19,7 +19,7 @@ source-repository head
 source-repository this
   type: git
   location: https://john-millikin.com/code/chell/
-  tag: chell-quickcheck_0.2.5
+  tag: chell-quickcheck_0.2.5.1
 
 library
   ghc-options: -Wall
@@ -27,7 +27,7 @@ library
   build-depends:
       base >= 4.0 && < 5.0
     , chell >= 0.3 && < 0.5
-    , QuickCheck >= 2.3 && < 2.9
+    , QuickCheck >= 2.3 && < 2.11
     , random
 
   exposed-modules:
