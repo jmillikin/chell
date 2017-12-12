@@ -1,5 +1,5 @@
 name: chell
-version: 0.4.0.1
+version: 0.4.0.2
 license: MIT
 license-file: license.txt
 author: John Millikin <john@john-millikin.com>
@@ -56,7 +56,7 @@ source-repository head
 source-repository this
   type: git
   location: https://john-millikin.com/code/chell/
-  tag: chell_0.4.0.1
+  tag: chell_0.4.0.2
 
 flag color-output
   description: Enable colored output in test results
@@ -77,7 +77,7 @@ library
 
   if flag(color-output)
     build-depends:
-        ansi-terminal >= 0.5 && < 0.7
+        ansi-terminal >= 0.5 && < 0.8
 
   exposed-modules:
     Test.Chell
