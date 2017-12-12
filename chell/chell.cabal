@@ -63,8 +63,7 @@ flag color-output
   default: True
 
 library
-  hs-source-dirs: lib
-  ghc-options: -Wall -O2
+  ghc-options: -Wall
 
   build-depends:
       base >= 4.1 && < 5.0
